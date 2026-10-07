@@ -1,0 +1,227 @@
+{
+  "name": "Porteiro - Aprovacao de Acesso",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "solicitar-verificacao-acesso",
+        "responseMode": "onReceived",
+        "responseData": "OK",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [-960, 0],
+      "id": "a1b2c3d4-1111-2222-3333-444455556666",
+      "name": "Webhook do Porteiro",
+      "webhookId": "porteiro-aprovacao-v2-c3d4e5f6a7b8"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg-ip",
+              "name": "ip",
+              "value": "={{ $json.query.ip }}",
+              "type": "string"
+            },
+            {
+              "id": "cfg-url",
+              "name": "porteiro_url",
+              "value": "http://host.docker.internal:5677",
+              "type": "string"
+            },
+            {
+              "id": "cfg-token",
+              "name": "admin_token",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "cfg-email",
+              "name": "admin_email",
+              "value": "voce@exemplo.com",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-720, 0],
+      "id": "b2c3d4e5-2222-3333-4444-555566667777",
+      "name": "Configuracoes"
+    },
+    {
+      "parameters": {
+        "operation": "sendAndWait",
+        "sendTo": "={{ $('Configuracoes').item.json.admin_email }}",
+        "subject": "Porteiro: visitante aguardando aprovacao",
+        "message": "=Um novo visitante esta tentando acessar o n8n.\n\nIP: {{ $('Configuracoes').item.json.ip }}\n\nClique abaixo para aprovar ou bloquear o acesso.",
+        "approvalOptions": {
+          "values": {
+            "approvalType": "double",
+            "approveLabel": "Aprovar",
+            "buttonApprovalStyle": "primary",
+            "disapproveLabel": "Bloquear",
+            "buttonDisapprovalStyle": "secondary"
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [-480, 0],
+      "id": "c3d4e5f6-3333-4444-5555-666677778888",
+      "name": "Email e Espera Aprovacao"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "approved-check",
+              "leftValue": "={{ $json.data.approved }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [-240, 0],
+      "id": "d4e5f6a7-4444-5555-6666-777788889999",
+      "name": "Foi Aprovado?"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Configuracoes').item.json.porteiro_url }}/n8n/aprovar?ip={{ $('Configuracoes').item.json.ip }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Admin-Token",
+              "value": "={{ $('Configuracoes').item.json.admin_token }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [0, -120],
+      "id": "e5f6a7b8-5555-6666-7777-888899990000",
+      "name": "Aprovar no Porteiro"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Configuracoes').item.json.porteiro_url }}/n8n/bloquear?ip={{ $('Configuracoes').item.json.ip }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Admin-Token",
+              "value": "={{ $('Configuracoes').item.json.admin_token }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [0, 120],
+      "id": "f6a7b8c9-6666-7777-8888-999900001111",
+      "name": "Bloquear no Porteiro"
+    },
+    {
+      "parameters": {
+        "content": "## Como funciona\n\n1. Porteiro chama esse webhook quando um IP novo aparece (passa o IP via ?ip=...)\n2. n8n responde 'OK' instantaneamente — porteiro nao fica esperando\n3. Email com botoes 'Aprovar'/'Bloquear' eh enviado ao admin\n4. Quando o admin clica, o fluxo retoma e chama de volta o porteiro com o veredito\n\n## Antes de ativar\n\n- Configure as credenciais SMTP no node 'Email e Espera Aprovacao'\n- Edite o node 'Configuracoes':\n  - admin_email = seu email de aprovador\n  - admin_token = mesmo valor de PORTEIRO_TOKEN definido no ambiente (deixe vazio se nao usar token)\n- Desative ou apague os workflows antigos 'Ip Permit' e 'Node De Aprovacao via Email' para nao duplicar o webhook",
+        "height": 360,
+        "width": 380
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-960, -420],
+      "id": "07b8c9d0-7777-8888-9999-000011112222",
+      "name": "Instrucoes"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook do Porteiro": {
+      "main": [
+        [
+          {
+            "node": "Configuracoes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuracoes": {
+      "main": [
+        [
+          {
+            "node": "Email e Espera Aprovacao",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email e Espera Aprovacao": {
+      "main": [
+        [
+          {
+            "node": "Foi Aprovado?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Foi Aprovado?": {
+      "main": [
+        [
+          {
+            "node": "Aprovar no Porteiro",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Bloquear no Porteiro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "00000000-0000-0000-0000-000000000001",
+  "meta": {},
+  "id": "PORT-APROV-001",
+  "tags": []
+}

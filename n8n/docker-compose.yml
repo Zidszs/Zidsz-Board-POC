@@ -1,0 +1,33 @@
+services:
+  n8n_app:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: n8n_app
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    extra_hosts:                                    
+      - "host.docker.internal:host-gateway"         
+    environment:
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=false
+      - N8N_PORT=5678
+      - N8N_SECURE_COOKIE=false
+      - WEBHOOK_URL=${NGROK_REMOTE_URL} 
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      # false: o nó Write pode gravar. O allowlist abaixo é que limita o disco.
+      - N8N_BLOCK_FS_WRITE_ACCESS=false
+      - N8N_BLOCK_FILE_ACCESS_TO_WORKSPACE=false
+      # Imagem n8n:latest (2.0+): sem isto o padrão é ~/.n8n-files.
+      # Só a pasta de arquivos do usuário. Não abrir / nem ~/.n8n.
+      - N8N_RESTRICT_FILE_ACCESS_TO=/home/node/Arquivos-n8n
+      - N8N_BLOCK_FILE_ACCESS_TO_N8N_FILES=true
+    volumes:
+      # Banco e credenciais. Não mudar este destino (n8n/n8n/data no host).
+      - ./n8n/data:/home/node/.n8n
+      # Relativo a este ficheiro (pasta n8n/): sobe à raiz do clone.
+      - ../Arquivos-n8n:/home/node/Arquivos-n8n
+    networks:
+      - rede_comunicacao
+
+networks:
+  rede_comunicacao:
+    external: true

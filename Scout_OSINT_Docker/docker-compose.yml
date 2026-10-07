@@ -1,0 +1,33 @@
+services:
+  scout-backend:
+    build: .
+    container_name: scout-backend
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    ports:
+      - "${SCOUT_ADMIN_PORT:-8765}:8765"
+      - "${SCOUT_PUBLIC_PORT:-4050}:${SCOUT_PUBLIC_PORT:-4050}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./data:/app/data
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    environment:
+      - SCOUT_BACKEND=1
+      - SCOUT_DATA_DIR=/app/data
+    networks:
+      - rede_comunicacao
+
+networks:
+  rede_comunicacao:
+    external: true
+
+# Linux produção (MITM + iptables no host):
+#   network_mode: host
+#   privileged: true
+#   remover secção ports acima
+#   SCOUT_UPSTREAM_HOST=127.0.0.1

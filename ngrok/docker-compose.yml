@@ -1,0 +1,20 @@
+services:
+  ngrok_service:
+    image: ngrok/ngrok:latest
+    container_name: ngrok_service
+    restart: unless-stopped
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+    command:
+      - "http"
+      - "host.docker.internal:${NGROK_TUNNEL_TARGET:-5677}"
+    ports:
+      - "4040:4040"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - rede_comunicacao
+
+networks:
+  rede_comunicacao:
+    external: true

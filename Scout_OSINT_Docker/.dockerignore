@@ -1,0 +1,9 @@
+.venv
+__pycache__
+*.pyc
+.git
+.gitignore
+*.md
+setup.bat
+setup.ps1
+Scout_network.py
