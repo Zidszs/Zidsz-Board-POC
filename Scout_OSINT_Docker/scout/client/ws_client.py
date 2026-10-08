@@ -1,4 +1,4 @@
-"""Cliente WebSocket — Scout Gate."""
+"""Cliente WebSocket deixado pelo protocolo da API. A aba Scout não o importa."""
 import json
 import threading
 

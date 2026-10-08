@@ -1,0 +1,14 @@
+{
+  "_comentario": "Copie para control_plane.local.json para sobrescrever URLs. Este arquivo não aceita comandos nem nomes de container.",
+  "health_timeout_seconds": 2.0,
+  "slow_threshold_ms": 1000,
+  "scout_build": false,
+  "shortcuts": {
+    "portainer": "http://localhost:9000"
+  },
+  "services": {
+    "langfuse": {
+      "health_url": "http://127.0.0.1:3000/api/public/health?failIfDatabaseUnavailable=true"
+    }
+  }
+}

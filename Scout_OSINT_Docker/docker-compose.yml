@@ -6,19 +6,51 @@ services:
     env_file:
       - ../.env
     ports:
-      - "${SCOUT_ADMIN_PORT:-8765}:8765"
-      - "${SCOUT_PUBLIC_PORT:-4050}:${SCOUT_PUBLIC_PORT:-4050}"
+      - "127.0.0.1:${SCOUT_ADMIN_PORT:-8765}:8765"
+      # Portal do túnel, só em loopback no host. O ngrok fala com scout-backend na rede Docker.
+      - "127.0.0.1:${SCOUT_PUBLIC_PORT:-4050}:${SCOUT_PUBLIC_PORT:-4050}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./data:/app/data
+      # Um arquivo por montagem. A pasta .n8groker inteira não entra:
+      # admin.key e usuario.key ficariam no container.
+      - ../.n8groker/porteiro-painel.token:/run/porteiro-painel.token:ro
+      # A renovação deslizante assina no portal. admin.key e usuario.key ficam de fora.
+      - ../.n8groker/sessao.key:/run/sessao.key:ro
+      - ../.n8groker/sessoes-geracao.json:/run/sessoes-geracao.json:ro
+      - ../.n8groker/porteiro-hmac.key:/run/porteiro-hmac.key:ro
+      # A linha varredura entra no mesmo audit.jsonl do painel. admin.key e usuario.key ficam de fora.
+      - ../.n8groker/audit.jsonl:/run/audit.jsonl
+      # Trilha e sessões. admin.key e usuario.key ficam de fora.
+      - ../.n8groker/trilha:/run/trilha
     cap_add:
       - NET_RAW
       - NET_ADMIN
     environment:
       - SCOUT_BACKEND=1
       - SCOUT_DATA_DIR=/app/data
+      - PORTEIRO_FILA_URL=http://host.docker.internal:5676/n8n/fila
+      - PORTEIRO_PAINEL_TOKEN_ARQUIVO=/run/porteiro-painel.token
+      - SESSAO_KEY_ARQUIVO=/run/sessao.key
+      - SESSAO_GERACAO_ARQUIVO=/run/sessoes-geracao.json
+      - PORTEIRO_HMAC_KEY_ARQUIVO=/run/porteiro-hmac.key
+      - N8GROKER_AUDIT_ARQUIVO=/run/audit.jsonl
+      - N8GROKER_TRILHA_DIR=/run/trilha
+      # Peer do ngrok, resolvido na hora. O gateway 172.18.0.1 não entra aqui.
+      - N8GROKER_PROXY_NOME=ngrok_service
+      # Processos do host. n8n, Langfuse e LiteLLM são containers.
+      - PAINEL_BORDA_HOST=${PAINEL_BORDA_HOST:-host.docker.internal}
+      - PAINEL_BORDA_PORT=${PAINEL_BORDA_PORT:-8502}
+      - SCOUT_PUBLIC_PORT=${SCOUT_PUBLIC_PORT:-4050}
+      - N8N_UPSTREAM_HOST=${N8N_UPSTREAM_HOST:-n8n_app}
+      - N8N_UPSTREAM_PORT=${N8N_UPSTREAM_PORT:-5678}
+      - LANGFUSE_UPSTREAM_HOST=${LANGFUSE_UPSTREAM_HOST:-langfuse-web}
+      - LANGFUSE_UPSTREAM_PORT=${LANGFUSE_UPSTREAM_PORT:-3000}
+      - LITELLM_UPSTREAM_HOST=${LITELLM_UPSTREAM_HOST:-litellm}
+      - LITELLM_UPSTREAM_PORT=${LITELLM_UPSTREAM_PORT:-4000}
+      - N8GROKER_ALERTA_WEBHOOK=${N8GROKER_ALERTA_WEBHOOK:-http://n8n_app:5678/webhook/alerta-trilha}
     networks:
       - rede_comunicacao
 

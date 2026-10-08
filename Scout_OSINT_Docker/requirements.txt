@@ -1,3 +1,4 @@
-# GUI cliente
-requests>=2.28.0
-websocket-client>=1.6.0
+# Neste ramo a janela Tk foi removida. A aba Scout do Control Plane
+# fala HTTP com a biblioteca padrão (scout/gate.py).
+# O backend Docker instala Scout_OSINT_Docker/requirements-backend.txt.
+# A janela clássica, e o pip deste arquivo, continuam só no branch master.

@@ -58,7 +58,7 @@ graph TB
 | Blocklist na borda | Sim | Via n8n |
 | Toggles por container/rota | Sim | Não |
 
-**Operação:** `iniciar_servicos.ps1` sobe o Scout automaticamente. Tecla **`G`** no HUD abre a GUI. `SCOUT_ENFORCE_FIREWALL=0` por defeito no Windows.
+**Operação:** `iniciar_servicos.ps1` sobe o Scout automaticamente. Tecla **`G`** no HUD abre o Control Plane em `http://localhost:8501/?aba=scout`. Neste ramo não há janela Tk; ela continua no `master`. `SCOUT_ENFORCE_FIREWALL=0` por defeito no Windows.
 
 **Rotas Scout vs Ngrok (acesso ao n8n):**
 
@@ -68,7 +68,7 @@ graph TB
 | Porta Scout que escuta (rota `porteiro`) | `listen_port` | **igual** a `SCOUT_PUBLIC_PORT` |
 | Destino após Scout | `SCOUT_UPSTREAM_HOST:PORT` | `host.docker.internal:5677` |
 | Modo da rota porteiro | `mode` | `tcp` |
-| Rotas activas recomendadas | GUI | **só** `porteiro` |
+| Rotas activas recomendadas | aba Scout | **só** `porteiro` |
 
 | Configuração | Resultado |
 |--------------|-----------|
@@ -79,18 +79,18 @@ graph TB
 
 O script `Sync-ScoutPorteiroRoute` (no boot) e a reconciliação em `redirection_registry.py` corrigem automaticamente a rota `porteiro-manual` com base no `.env`.
 
-**Shutdown repassado Scout → supervisor:** ao fechar a GUI (X), o utilizador pode escolher encerrar toda a stack. A GUI escreve `.n8groker.shutdown.request` na raiz; o `iniciar_servicos.ps1` detecta o ficheiro no loop HUD (~100 ms) e executa `Stop-Tudo` (Ngrok → n8n → Scout → Porteiro).
+**Encerramento:** neste ramo o núcleo fecha com **Q** no HUD. O console não tem botão para parar o núcleo. n8n e Langfuse/LiteLLM param pelos botões da stack. Não há janela para fechar. O loop do HUD ainda honra um `.n8groker.shutdown.request` com `source` `scout_gui` se o arquivo aparecer (resto da versão clássica); este ramo não grava esse arquivo.
 
-### Scout Gate — GUI e funcionalidades
+### Scout Gate — aba Scout
 
-A GUI (`Scout_network.py`, tecla **G** no HUD) liga-se ao backend via WebSocket (`SCOUT_BACKEND_URL`).
+A gestão (`scout/gate.py`, tecla **G** no HUD) fala HTTP com o backend. `SCOUT_BACKEND_URL` em `ws://127.0.0.1:8765/ws` vira `http://127.0.0.1:8765`. O login do painel protege a seção.
 
-| Aba | Função |
+| Bloco | Função |
 |-----|--------|
-| **Redireccionamentos** | Toggles por rota; selector tcp/http/https; portas manuais; sync Docker |
-| **Tráfego** | Sessões em tempo real (hora, cliente, rota, **modo**, upstream, bytes) |
-| **Clientes** | IPs vistos persistidos em `data/known_clients.json` — última interacção, modo, sessões; alias/bloquear sem seguir o log |
-| **Config** | URL backend, health check |
+| **Redirecionamentos** | Toggles por rota; modo tcp/http/https; portas manuais; sync Docker |
+| **Tráfego** | Sessões (hora, cliente, rota, modo, upstream, bytes) e alertas |
+| **Clientes** | IPs vistos persistidos em `data/known_clients.json` — última interação, modo, sessões; alias, bloquear, desbloquear e remover |
+| **Configuração** | Endereço HTTP, health check, ngrok, firewall, docker |
 
 **Aliases confiáveis:** IP com alias manual deixa de gerar alertas de tráfego/bloqueio na borda Scout e é removido da blocklist ao nomear.
 
@@ -98,18 +98,7 @@ A GUI (`Scout_network.py`, tecla **G** no HUD) liga-se ao backend via WebSocket 
 
 **Sync automático:** `Sync-ScoutPorteiroRoute` no `iniciar_servicos.ps1` e `reconcile_porteiro_entry` em `route_config.py` mantêm a rota `porteiro-manual` coerente com `SCOUT_PUBLIC_PORT` e `SCOUT_UPSTREAM_*`.
 
-```mermaid
-sequenceDiagram
-    participant GUI as Scout_GUI
-    participant Flag as shutdown.request
-    participant PS as iniciar_servicos.ps1
-
-    GUI->>GUI: Fechar X
-    GUI->>GUI: Sim encerrar tudo?
-    GUI->>Flag: Escreve pedido
-    PS->>Flag: Detecta e remove
-    PS->>PS: Stop-Tudo
-```
+Não portado da janela do `master`: tick WebSocket de 1 segundo, bipe no alerta e fechar a janela para encerrar a stack. A tabela completa está no README, seção **Paridade da aba Scout**.
 
 ---
 
@@ -117,9 +106,10 @@ sequenceDiagram
 
 | Componente | Tecnologia | Porta | Função |
 |------------|------------|-------|--------|
-| **Scout Gate** | Docker (Python) | `4050` (MITM), `8765` (API) | OSINT: MITM, tráfego, clientes, aliases, blocklist (`USE_SCOUT`) |
-| **Porteiro** | Node.js nativo | `5677` | Proxy reverso, firewall por IP, fila, JSON portátil |
-| **n8n** | Docker (`n8nio/n8n`) | `5678` | Automação e workflows de aprovação |
+| **Scout Gate** | Docker (Python) | `4050` (MITM), `127.0.0.1:8765` (API) | OSINT: MITM, tráfego, clientes, aliases, blocklist (`USE_SCOUT`). A gestão é a aba Scout do painel |
+| **Porteiro** | Node.js nativo | `127.0.0.1:5677` (visitante), `127.0.0.1:5676` (`/n8n/*`) | Proxy reverso, fila por IP, rotas de aprovação só na rede local |
+| **n8n** | Docker (`n8nio/n8n`) | `127.0.0.1:5678` | Automação e workflows de aprovação. `localhost:5678` continua direto |
+| **Control Plane** | Streamlit | `127.0.0.1:8501` (console), `127.0.0.1:8502` (borda `/painel`) | Infraestrutura, Scout, Chat e, no console, a aba Admin |
 | **Ngrok** | Docker (`ngrok/ngrok`) | `4040` (API) | Túnel HTTPS → Scout ou Porteiro |
 | **Orquestrador** | PowerShell | — | `iniciar_servicos.ps1`: boot, HUD, shutdown |
 | **Setup** | Batch + PowerShell | — | `Setup.bat`: deps e auto-config |
@@ -177,22 +167,25 @@ flowchart LR
 | Script | Quando usar | O que faz |
 |--------|-------------|-----------|
 | **`Setup.bat`** | Primeira vez ou máquina nova | Checklist de 11 dependências; menu por item: auto-config, abrir link, ignorar, reverificar; pode criar `.env` e rede Docker; **não** sobe serviços nem configura n8n |
-| **`factory_reset.bat`** | Cópia do projecto para estado “GitHub limpo” | Confirmação `Excluir`; para containers; apaga `.env`, SQLite n8n, storage Porteiro, Scout/data, venv; recria `.gitkeep`; opcional **S** recria `.env` a partir do template; **não** apaga imagens Docker |
+| **`factory_reset.bat`** | Cópia do projecto para estado “GitHub limpo” | Confirmação `Excluir`; para containers; apaga `.env`, SQLite n8n, storage Porteiro, Scout/data, venv; recria `.gitkeep`; **não** apaga `Arquivos-n8n/`; opcional **S** recria `.env` a partir do template; **não** apaga imagens Docker |
 | **`iniciar_servicos.ps1`** | Operação diária | Boot completo + HUD + sync ngrok + Scout |
-| **`Scout_OSINT_Docker/setup.bat`** | Só Scout, sem stack N8Groker | venv, container, GUI standby |
+| **`Scout_OSINT_Docker/setup.bat`** | Só Scout, sem stack N8Groker | container Docker e standby; G abre o painel |
 
 ### Setup.bat — checklist interactivo
 
-Ordem de verificação: ExecutionPolicy → `.env` → chaves ngrok/n8n → Docker instalado/a correr → WSL2 → rede `rede_comunicacao` → Node.js → Python/Scout (se `USE_SCOUT=1`) → pastas de dados → portas livres.
+Ordem de verificação: ExecutionPolicy → `.env` → chaves ngrok/n8n → Docker instalado/a correr → WSL2 → rede `rede_comunicacao` → Node.js → Python do Control Plane → pastas de dados → portas livres → venv do painel → imagens Langfuse/LiteLLM.
 
-Auto-config disponível onde seguro: policy, copiar `.env`, criar rede Docker (`rede_comunicacao`), scaffold de pastas, venv + pip Scout, abrir `.env` no Notepad.
+O host pede **Python 3.10+** (Control Plane e geração do `.env`). Nenhum módulo exige 3.11; a imagem Docker do Scout já é 3.11. O Scout sobe no Docker.
+
+Auto-config disponível onde seguro: policy, copiar `.env`, criar rede Docker (`rede_comunicacao`), scaffold de pastas, venv + pip do Control Plane, abrir `.env` no Notepad. O Scout não pede venv de janela: o backend sobe no Docker.
 
 **O que o Setup não faz** (fica para você ou para o `iniciar_servicos.ps1`):
 
 | Não incluído | Quem resolve |
 |--------------|--------------|
 | Subir containers n8n/ngrok/Scout | `iniciar_servicos.ps1` |
-| Criar conta admin no n8n | Você, no primeiro acesso em `:5678` |
+| Criar a conta do produto n8n | Você, no primeiro acesso em `http://127.0.0.1:5678` |
+| Abrir a sessão admin do painel | Você, com o JWT (`python -m control_plane.admin_token`) em `http://localhost:8501` |
 | Importar / ativar workflows | Você, no editor n8n |
 | Configurar SMTP | Você, no node `Email e Espera Aprovacao` |
 | Preencher `admin_email` / `admin_token` no workflow | Você, no node `Configuracoes` |
@@ -220,41 +213,43 @@ sequenceDiagram
     autonumber
     actor User as Operador
     participant PS as iniciar_servicos.ps1
+    participant CP as Control Plane
     participant P as Porteiro
     participant D as Docker
-    participant N as n8n
-    participant G as Ngrok
 
     User->>PS: Executa script
-    PS->>PS: Verifica Node.js, Docker, .env
+    PS->>PS: Verifica Node.js, Docker, .env, venv
+    PS->>CP: Console 127.0.0.1:8501 e borda 127.0.0.1:8502
+    PS->>PS: Ollama local, se USE_OLLAMA_LOCAL=1
+    PS->>P: node porteiro.js
+    PS->>D: compose up ngrok e grava a URL pública
+    PS->>D: Scout, se USE_SCOUT=1, depois Langfuse/LiteLLM
+    PS->>D: compose up n8n
+    PS->>PS: docker inspect n8n_app para .n8groker/n8n-container-ip
 
-    PS->>P: Start node porteiro.js (PID rastreado)
-    P->>P: Carrega controle_acesso.json
-    P->>G: GET localhost:4040/api/tunnels
-    P->>P: Define DOMINIO_BLOQUEADO dinâmico
-
-    PS->>D: docker-compose up n8n
-    PS->>D: docker-compose up ngrok
-
-    loop HUD (atualiza ~5s)
+    loop HUD
         PS->>D: Status containers
-        PS->>G: URL pública atual
+        PS->>PS: Atualiza o IP do n8n se o container está Up
         alt URL Ngrok mudou
-            PS->>D: Reinjeta NGROK_REMOTE_URL no n8n
+            PS->>D: Reinjeta NGROK_REMOTE_URL no n8n e no Scout
         end
-        PS->>P: Lê fila e logs do Porteiro
     end
 
     User->>PS: Tecla Q
-    PS->>P: Stop-Porteiro (PID)
-    PS->>D: docker-compose down n8n + ngrok
+    PS->>CP: Encerra 8501 e 8502
+    PS->>P: Stop-Porteiro
+    PS->>D: compose down
 ```
 
 **Pontos-chave do boot:**
 - Pré-requisitos validados antes de subir qualquer serviço (Node, Docker, `.env`). Use **`Setup.bat`** numa máquina nova para preparar tudo numa sessão.
+- Ordem: Control Plane (console `8501` e borda `8502`), Ollama local se `USE_OLLAMA_LOCAL=1`, Porteiro, ngrok, Scout se `USE_SCOUT=1`, Langfuse/LiteLLM, n8n por último.
+- O Scout sobe antes do ngrok, para `scout-backend` existir na rede. A URL pública entra em `SCOUT_NGROK_TUNNEL_URL` e `NGROK_REMOTE_URL` antes do primeiro `up` do n8n. O Scout é recriado uma vez depois da URL.
 - Com `USE_SCOUT=1`: sobe `scout-backend`, `Sync-ScoutPorteiroRoute`, Ngrok aponta para `:4050`.
 - Sem Scout: Ngrok aponta para `host.docker.internal:5677` (Porteiro).
-- URL pública é reinjetada automaticamente em `WEBHOOK_URL` do n8n quando o túnel muda.
+- Depois que o n8n estabiliza, `docker inspect` de `n8n_app` grava `.n8groker/n8n-container-ip`. Não há IP fixo. O HUD relê esse arquivo enquanto o container está `Up`.
+- URL pública é reinjetada em `WEBHOOK_URL` do n8n quando o túnel muda de verdade.
+- A tecla **Q** fecha o que este script abriu, inclusive as portas `8501` e `8502`. Processo alheio nessas portas não é morto. Venv recusado não sobe o Streamlit.
 
 ---
 
@@ -275,19 +270,21 @@ sequenceDiagram
     Ngrok->>Porteiro: Encaminha tráfego
     Porteiro->>Porteiro: Identifica IP real<br/>(socket ou X-Forwarded-For)
 
-    alt IP local / Docker (imune)
-        Porteiro->>n8n: Proxy direto → 5678
+    alt Loopback sem visitante no X-Forwarded-For
+        Porteiro->>n8n: Proxy direto → 127.0.0.1:5678
         n8n-->>Visitante: Resposta n8n
+    else Socket na rede Docker, fora da lista de proxies
+        Porteiro-->>Visitante: Acesso negado
     else IP novo (desconhecido)
         Porteiro->>Porteiro: Registra status=pendente
         Porteiro-->>Visitante: HTTP 202 — "Acesso em Análise"
-        Porteiro->>n8n: GET /webhook/solicitar-verificacao-acesso?ip=X
+        Porteiro->>n8n: GET /webhook/solicitar-verificacao-acesso?ip=X&origem=&pais=
         n8n-->>Porteiro: OK (resposta imediata)
         n8n->>Admin: E-mail com botões Aprovar / Bloquear
 
         alt Admin aprova
-            Admin->>n8n: Clica "Aprovar"
-            n8n->>Porteiro: GET /n8n/aprovar?ip=X<br/>+ X-Admin-Token
+            Admin->>n8n: Clica "Aprovar" ou usa a aba Admin
+            n8n->>Porteiro: GET /n8n/aprovar?ip=X&origem=Y<br/>+ X-Admin-Token, só na rede local
             Porteiro->>Porteiro: status=aprovado (persiste JSON)
             Visitante->>Porteiro: Reload (auto 5s)
             Porteiro->>n8n: Proxy liberado
@@ -330,15 +327,18 @@ flowchart TD
     FW -->|Sim, externo| R403A[HTTP 403 — rota bloqueada]
     FW -->|Não| ADM{Rota admin<br/>/n8n/aprovar ou bloquear?}
 
-    ADM -->|Sim| IMM{IP socket<br/>localhost ou Docker?}
-    IMM -->|Não| R403B[HTTP 403]
-    IMM -->|Sim| TOK{PORTEIRO_TOKEN<br/>válido?}
-    TOK -->|Inválido| R403C[HTTP 403]
-    TOK -->|OK| CMD[Atualiza status do IP]
+    ADM -->|Sim| TOK{Token de aprovação<br/>painel ou n8n?}
+    TOK -->|Ausente ou inválido| R403C[HTTP 403 antes da fila]
+    TOK -->|OK| TUN{Sinal de túnel?<br/>XFF, X-Forwarded-Host ou Host ngrok}
+    TUN -->|Sim| R403B[HTTP 403 mesmo com token]
+    TUN -->|Não| IMM{Socket loopback<br/>ou IP do n8n descoberto?}
+    IMM -->|Não| R403B
+    IMM -->|Sim| CMD[Atualiza status do IP]
 
-    ADM -->|Não| IP{IP imune?<br/>127.0.0.1 / 172.16-31.x}
-    IP -->|Sim| PROXY[Proxy → n8n :5678]
-    IP -->|Não| REG{Status no banco}
+    ADM -->|Não| IP{decidirIp}
+    IP -->|local| PROXY[Proxy → 127.0.0.1:5678]
+    IP -->|rede Docker| R403E[Negado]
+    IP -->|visitante| REG{Status no banco}
     REG -->|aprovado| PROXY
     REG -->|bloqueado| R403D[HTTP 403 permanente]
     REG -->|pendente| R202[HTTP 202 — aguardando]
@@ -350,9 +350,10 @@ flowchart TD
 
 | Mecanismo | Implementação | Ganho |
 |-----------|---------------|-------|
-| IP do socket como fonte de verdade | `req.socket.remoteAddress` | Impede spoofing de IP pelo cliente |
-| X-Forwarded-For condicional | Só confiável se socket = localhost (Ngrok local) | IP real do visitante sem abrir brecha |
-| Rotas admin restritas | Apenas localhost/Docker + token opcional | n8n comanda o Porteiro sem exposição externa |
+| IP do visitante | `decidirIp` em `Porteiro/identidade.js` | Loopback com `X-Forwarded-For` público é o visitante. `172.16/12` e `192.168.65.0/24` não são imunes |
+| X-Forwarded-For condicional | No loopback, ou num proxy listado em `PORTEIRO_TRUSTED_PROXIES` | O ngrok grava o header; o visitante não o remove. O pipe do Scout copia os bytes |
+| Rotas admin com token | `X-Admin-Token` igual a `.n8groker/porteiro-painel.token` ou `porteiro-n8n.token`, em qualquer porta e IP | Sem token a resposta é 403, antes do 404 da fila. `PORTEIRO_TOKEN` do `.env` é ignorado |
+| Rotas admin só locais | `127.0.0.1:5676`, ou `5677` se o socket for loopback ou o IP de `n8n_app` em `.n8groker/n8n-container-ip`, e sem sinal de túnel | Token válido não abre o domínio ngrok. No Docker Desktop, `host.docker.internal:5676` parece loopback; a proteção é o token |
 | Webhook interno bloqueado externamente | `/webhook/solicitar-verificacao-acesso` → 403 via proxy | Visitante não dispara aprovação falsa |
 | Rate limiting | 60 req/min por IP de socket | Proteção básica contra DoS |
 | Persistência atômica | write `.tmp` + rename | Banco JSON não corrompe em crash |
@@ -392,18 +393,25 @@ Após importar `Aprovacao de Acesso (Novo).json`:
 
 | Passo | Onde | Detalhe |
 |-------|------|---------|
-| 1 | n8n (primeiro acesso) | Criar conta **admin** — obrigatório após factory reset |
+| 1 | n8n (primeiro acesso) | Criar a conta do produto n8n em `http://127.0.0.1:5678` — obrigatório após factory reset. Não é o JWT do painel |
 | 2 | Node **Configuracoes** | `admin_email` → e-mail real do aprovador |
-| 3 | Node **Configuracoes** | `admin_token` → vazio **ou** igual a `PORTEIRO_TOKEN` (ver abaixo) |
+| 3 | Node **Configuracoes** | `admin_token` → `{{ $env.PORTEIRO_N8N_TOKEN }}` (já vem no JSON). Se `$env` for recusado, cole `.n8groker/porteiro-n8n.token` |
 | 4 | Node **Configuracoes** | `porteiro_url` → `http://host.docker.internal:5677` (já vem no JSON) |
 | 5 | Node **Email e Espera Aprovacao** | Credencial **SMTP** (obrigatório para enviar e-mail) |
 | 6 | Barra do workflow | **Activar** — o ficheiro importado traz `"active": false` |
 
-**`PORTEIRO_TOKEN` e `admin_token`:**
+**Tokens de aprovação e `admin_token`:**
 
-- O `.env` guarda `PORTEIRO_TOKEN` como referência; o Node **não** lê o `.env` automaticamente.
-- Com `admin_token` vazio no workflow e sem token no processo Porteiro, `/n8n/aprovar` e `/n8n/bloquear` aceitam chamadas do container n8n (IP interno Docker).
-- Se quiser token: use o **mesmo valor** em `PORTEIRO_TOKEN` (`.env`) e `admin_token` (workflow); para o Porteiro enxergar o token, é preciso exportar a variável ao iniciar o Node (hoje o `iniciar_servicos.ps1` não injecta — copie manualmente para o workflow).
+- Não ficam no `.env`. O Scout monta esse arquivo. O `iniciar_servicos.ps1` grava `.n8groker/porteiro-painel.token` (aba Admin) e `.n8groker/porteiro-n8n.token` (workflow). O compose do n8n carrega só `.n8groker/porteiro-n8n.env`.
+- O Porteiro ignora `PORTEIRO_TOKEN`. Sem token, ou com token errado, `/n8n/*` responde 403 em qualquer porta, inclusive loopback, antes de consultar a fila.
+- Um workflow já importado não atualiza sozinho. Se o n8n bloquear `$env`, cole o conteúdo de `porteiro-n8n.token` no campo `admin_token`. Campo vazio fecha a aprovação (403).
+- A imagem do n8n lê `NODES_EXCLUDE` (array JSON). `N8N_NODES_EXCLUDE` no `.env` é a lista separada por vírgula; o `iniciar_servicos.ps1` converte e mostra `docker exec n8n_app printenv NODES_EXCLUDE` no log. Tira Execute Command, SSH e os nodes de arquivo local. Vale também para `localhost:5678`. O node Code continua. `N8N_BLOCK_ENV_ACCESS_IN_NODE` não é ligado, porque este workflow lê `$env.PORTEIRO_N8N_TOKEN`.
+- `.n8groker/porteiro-hmac.key` tem de ser arquivo, não pasta. O `iniciar_servicos.ps1` cria o arquivo antes do compose e repara pasta vazia. Sem essa chave o painel público não assina o cabeçalho.
+- No Docker Desktop, `host.docker.internal:5676` chega como loopback. O bind não isola o outro container. A proteção é o token.
+
+`/n8n/aprovar`, `/n8n/bloquear`, `/n8n/vincular`, `/n8n/fila` e `/n8n/solicitar` não atendem pelo domínio do ngrok. Da máquina, o prefixo é `http://127.0.0.1:5676`. Do container n8n, `http://host.docker.internal:5677`, sem header de proxy. A aba Admin do console fala só com a porta 5676, atualiza a lista na hora e segue mesmo se o webhook do n8n responder 404. Aprovar um par IP e origem não grava `conta_vinculada`. Sem `origem` o dispositivo não fica aprovado. Vincular exige esse par já `aprovado` e não é feito por `/n8n/aprovar`. O webhook manda impressão, origem, navegador, sistema, idioma e horário; `pais` vai vazio. Um workflow já importado não recebe esses campos sozinho.
+
+A conta criada em `http://127.0.0.1:5678` é a conta do produto n8n. O admin do painel não tem usuário nem senha: é o JWT de `python -m control_plane.admin_token`, colado no console em `http://localhost:8501`.
 
 ---
 
@@ -416,7 +424,7 @@ graph LR
     end
 
     subgraph Host_Windows
-        P5677["Porteiro<br/>0.0.0.0:5677"]
+        P5677["Porteiro<br/>127.0.0.1:5677"]
         N5678["n8n host<br/>127.0.0.1:5678"]
         API4040["Ngrok API<br/>localhost:4040"]
     end
@@ -436,11 +444,19 @@ graph LR
 
 | Porta | Serviço | Exposta externamente? |
 |-------|---------|------------------------|
-| `4050` | Scout MITM (com `USE_SCOUT=1`) | Sim (via Ngrok) |
-| `8765` | Scout API / WebSocket GUI | Apenas localhost |
-| `5677` | Porteiro | Sim (via Ngrok se `USE_SCOUT=0`) |
-| `5678` | n8n | Não directamente (só via Porteiro ou localhost) |
+| `4050` | Scout MITM (com `USE_SCOUT=1`) | Sim (via Ngrok). Escuta no host |
+| `8765` | Scout API de gestão (HTTP) | Não. Publish `127.0.0.1:8765` |
+| `5676` | Porteiro, rotas `/n8n/*` | Não. Escuta só em `127.0.0.1` |
+| `5677` | Porteiro, visitante | Sim, só `127.0.0.1`. No Docker Desktop o ngrok chega por `host.docker.internal` |
+| `5678` | n8n | Não. Publish `127.0.0.1:5678`. `localhost:5678` é direto |
+| `8501` | Control Plane, console | Não. `127.0.0.1`. O browser usa `http://localhost:8501` |
+| `8502` | Control Plane, borda `/painel` | Não. `127.0.0.1`. Só o Porteiro encaminha, com HMAC |
 | `4040` | Ngrok dashboard/API | Apenas localhost |
+| `3000` | Langfuse | UI no host |
+| `3030` | Langfuse worker | Health, só localhost |
+| `4000` | LiteLLM | UI em `/ui` |
+| `9090` | MinIO do Langfuse | Só `127.0.0.1` |
+| `11434` | Ollama local | Só se `USE_OLLAMA_LOCAL=1` e o programa existir. Não entra no LiteLLM pelo script |
 
 ---
 
@@ -469,7 +485,7 @@ graph TB
 
 `n8n/storage/Porteiro` existe para o Porteiro (Node no host) e para o HUD. O workflow de aprovação fala com o Porteiro por HTTP, não por arquivo. O compose antigo montava `./n8n/storage` a partir de `n8n/docker-compose.yml`, isto é `n8n/n8n/storage` em `/home/node/.n8n-files`. Nenhum script grava nessa pasta dobrada; o Docker é que a criava no primeiro `up`. Na primeira subida, `setup_projeto.ps1` e `iniciar_servicos.ps1` movem o que houver lá para `Arquivos-n8n/` (sem sobrescrever nome já existente) e deixam o marcador `n8n/n8n/storage/.migrado-para-Arquivos-n8n`. O volume do banco não muda: `./n8n/data` → `/home/node/.n8n` no host `n8n/n8n/data`. O `.gitkeep` solto em `n8n/data/` foi removido; o `factory_reset` ainda apaga essa pasta se uma cópia antiga existir, e não a recria.
 
-No nó **Read/Write Files from Disk** use `/home/node/Arquivos-n8n/entrada.csv`. `N8N_RESTRICT_FILE_ACCESS_TO=/home/node/Arquivos-n8n` e `N8N_BLOCK_FILE_ACCESS_TO_N8N_FILES=true`.
+No nó **Read/Write Files from Disk** use `/home/node/Arquivos-n8n/entrada.csv`. `N8N_RESTRICT_FILE_ACCESS_TO=/home/node/Arquivos-n8n` e `N8N_BLOCK_FILE_ACCESS_TO_N8N_FILES=true`. `NODES_EXCLUDE` continua tirando Execute Command, SSH e os nodes de arquivo local até o nome sair da lista. Apague o nome e recrie o container para o caminho passar a valer.
 
 **Registro de visitante (exemplo):**
 ```json
@@ -535,24 +551,42 @@ mindmap
 
 ## 11. Variáveis de Ambiente
 
-| Variável | Onde | Propósito |
-|----------|------|-----------|
-| `NGROK_AUTHTOKEN` | `.env` | Autenticação no Ngrok |
-| `N8N_ENCRYPTION_KEY` | `.env` | Criptografia do banco n8n |
-| `NGROK_REMOTE_URL` | `.env` (vazia no `.env_template`) | O orquestrador preenche quando o túnel ngrok sobe e reinjeta como `WEBHOOK_URL`. Não preencher à mão. |
-| `N8N_RESTRICT_FILE_ACCESS_TO` | `n8n/docker-compose.yml` | Allowlist dos nós de arquivo: `/home/node/Arquivos-n8n`. Na imagem `n8n:latest` (2.0+) o padrão é `~/.n8n-files`. Várias pastas separam-se com `;`. O Porteiro não precisa de entrada: não há fluxo lendo `n8n/storage` de dentro do container. |
-| `N8N_BLOCK_FILE_ACCESS_TO_N8N_FILES` | `n8n/docker-compose.yml` | `true` (padrão oficial): bloqueia `/home/node/.n8n` e ficheiros internos do n8n. |
-| `PORTEIRO_TOKEN` | `.env` / Node | Token compartilhado n8n ↔ Porteiro |
-| `PORTEIRO_USER` / `PORTEIRO_PASS` | `.env` | Basic Auth do n8n (template) |
-| `PORTEIRO_DATA_DIR` | `.env` (opcional) | Override pasta dados Porteiro |
-| `USE_SCOUT` | `.env` | `1` = Ngrok → Scout → Porteiro; `0` = legado |
-| `SCOUT_PUBLIC_PORT` | `.env` | Porta MITM (Ngrok upstream, ex. `4050`) |
-| `SCOUT_ADMIN_PORT` | `.env` | API Scout (ex. `8765`) |
-| `SCOUT_UPSTREAM_HOST` / `PORT` | `.env` | Destino após Scout (ex. `host.docker.internal:5677`) |
-| `SCOUT_DEFAULT_ROUTE_MODE` | `.env` | Modo inicial só se rota ainda sem `mode` guardado |
-| `SCOUT_BACKEND_URL` | `.env` | WebSocket GUI (ex. `ws://127.0.0.1:8765/ws`) |
-| `SCOUT_NGROK_TUNNEL_URL` | `.env` | URL pública sync pelo script (informativo) |
-| `SCOUT_ENFORCE_FIREWALL` | `.env` | `0` no Windows por defeito |
+A lista abaixo é a do `.env.example` (e do `.env_template`, com as mesmas chaves), mais os segredos que ficam fora dela. O Setup chama `scripts/init_env.py` e troca cada `__GENERATE_*__` por um segredo. Não commite o `.env`. Não coloque chave de provider de LLM aqui: modelo e credencial entram pela UI do LiteLLM. A chave do JWT (`admin.key`), a do HMAC do Porteiro e os tokens de aprovação não são variáveis do `.env`: ficam em `.n8groker/`, porque o compose do Scout carrega o `.env`.
+
+| Variável | Propósito |
+|----------|-----------|
+| `PORTEIRO_USER`, `PORTEIRO_PASS` | Basic Auth do n8n no modelo |
+| `N8N_ENCRYPTION_KEY` | Criptografia do banco n8n. Não troque depois do primeiro boot |
+| `NGROK_AUTHTOKEN` | Token do ngrok.com. O Setup não inventa este valor |
+| `NGROK_REMOTE_URL` | Vazia no `.env.example` e no `.env_template`. O orquestrador define no processo quando o túnel ngrok sobe e reinjeta como `WEBHOOK_URL`. Não preencher à mão. A URL que permanece no `.env` é `SCOUT_NGROK_TUNNEL_URL`. |
+| `N8N_RESTRICT_FILE_ACCESS_TO` | `n8n/docker-compose.yml`. Allowlist dos nós de arquivo: `/home/node/Arquivos-n8n`. Na imagem n8n `2.42.5` (2.0+) o padrão é `~/.n8n-files`. Várias pastas separam-se com `;`. O Porteiro não precisa de entrada: não há fluxo lendo `n8n/storage` de dentro do container. Os nodes de arquivo seguem em `NODES_EXCLUDE` até o nome sair da lista. |
+| `N8N_BLOCK_FILE_ACCESS_TO_N8N_FILES` | `n8n/docker-compose.yml`. `true`: bloqueia `/home/node/.n8n` e ficheiros internos do n8n. |
+| Tokens em `.n8groker/` | `porteiro-painel.token` e `porteiro-n8n.token`. Não são chaves do `.env`. O Porteiro ignora `PORTEIRO_TOKEN` se ele ainda estiver no arquivo antigo |
+| `USE_SCOUT` | `1` = Ngrok → Scout → Porteiro; `0` = legado, direto no `5677` |
+| `SCOUT_PUBLIC_PORT` | Porta MITM, padrão `4050` |
+| `SCOUT_ADMIN_PORT` | API do Scout, padrão `8765`, publicada só em `127.0.0.1` |
+| `SCOUT_UPSTREAM_HOST`, `SCOUT_UPSTREAM_PORT` | Destino da rota porteiro, padrão `host.docker.internal` e `5677` |
+| `SCOUT_DEFAULT_ROUTE_MODE` | Modo inicial só se a rota ainda não tiver `mode` |
+| `SCOUT_LISTEN_PORT_START` | Pool de portas para rotas Docker novas |
+| `SCOUT_ENFORCE_FIREWALL` | `0` no Windows |
+| `SCOUT_NGROK_TUNNEL_URL` | URL pública gravada pelo script |
+| `SCOUT_BACKEND_URL` | `ws://127.0.0.1:8765/ws`. A aba Scout converte para HTTP |
+| `NEXTAUTH_URL`, `NEXTAUTH_SECRET`, `SALT`, `ENCRYPTION_KEY`, `TELEMETRY_ENABLED` | Langfuse |
+| `LANGFUSE_DB_USER`, `LANGFUSE_DB_PASSWORD`, `LANGFUSE_DB_NAME` | Postgres do Langfuse |
+| `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD` | ClickHouse do Langfuse |
+| `REDIS_AUTH` | Redis do Langfuse |
+| `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD` | MinIO do Langfuse |
+| `LANGFUSE_INIT_ORG_ID`, `LANGFUSE_INIT_ORG_NAME`, `LANGFUSE_INIT_PROJECT_ID`, `LANGFUSE_INIT_PROJECT_NAME` | Org e projeto criados no primeiro boot |
+| `LANGFUSE_INIT_USER_EMAIL`, `LANGFUSE_INIT_USER_NAME`, `LANGFUSE_INIT_USER_PASSWORD` | Login inicial. O e-mail do modelo é `admin@example.com` |
+| `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` | Par usado pelo Langfuse e pelo callback do LiteLLM |
+| `LITELLM_DB_USER`, `LITELLM_DB_PASSWORD`, `LITELLM_DB_NAME` | Postgres do LiteLLM |
+| `LITELLM_MASTER_KEY`, `LITELLM_SALT_KEY` | Proxy. Sem modelo pré-cadastrado |
+| `LITELLM_UI_USERNAME`, `LITELLM_UI_PASSWORD` | Login da UI em `http://localhost:4000/ui` |
+| `USE_OLLAMA_LOCAL` | `1` sobe o Ollama desta máquina se estiver instalado e parado. `0` não mexe no programa |
+| `OLLAMA_BASE_URL`, `SUPPORT_CHAT_MODEL` | Chat de suporte. Padrão `http://localhost:11434` e `qwen2.5:7b-instruct`. Não cadastram modelo no LiteLLM |
+| `N8N_CREDENTIALS_OVERWRITE_DATA` | Credencial OpenAI do n8n apontando para `http://litellm:4000/v1` |
+
+O script injeta `NGROK_REMOTE_URL` como `WEBHOOK_URL` do n8n. Não preencha essa chave à mão. `PORTEIRO_DATA_DIR` é override opcional da pasta do Porteiro.
 
 ---
 
@@ -563,27 +597,33 @@ N8Groker/
 ├── Setup.bat / setup_projeto.ps1   # Checklist dependencias (primeira vez)
 ├── factory_reset.bat / .ps1        # Reset dados volatil (usar em copia)
 ├── iniciar_servicos.ps1            # Orquestrador + HUD
-├── .env_template                   # Modelo de configuracao
+├── setup.sh                        # Setup Linux
+├── .env.example / .env_template    # Mesmas chaves; segredos nascem no Setup
 ├── Arquivos-n8n/                   # Arquivos dos fluxos (caminho no nó: /home/node/Arquivos-n8n/)
 ├── README.md                       # Guia de entrada
+├── CONTRIBUTING.md
 ├── DOCUMENTACAO.md                 # Documentacao tecnica
+├── docs/                           # Desenho de acesso multiusuario
+├── control_plane/                  # Painel Streamlit (console e borda)
+├── llm/                            # Langfuse + LiteLLM
 ├── Porteiro/
-│   └── porteiro.js                 # Proxy + firewall IP (paths relativos)
+│   └── porteiro.js                 # Proxy + fila (paths relativos)
 ├── n8n/
-│   ├── docker-compose.yml
+│   ├── docker-compose.yml          # publish 127.0.0.1:5678
 │   ├── n8n/data/                   # SQLite n8n (gerado)
 │   └── storage/Porteiro/           # JSON Porteiro + logs (gerado)
 ├── ngrok/
 │   └── docker-compose.yml
 ├── Scout_OSINT_Docker/
-│   ├── docker-compose.yml
-│   ├── setup.bat / setup.ps1       # Scout isolado
-│   ├── Scout_network.py            # GUI
-│   ├── scout/                      # Backend Python
+│   ├── docker-compose.yml          # API 127.0.0.1:8765; MITM 4050
+│   ├── setup.bat / setup.ps1       # Scout isolado; G abre o painel
+│   ├── scout/                      # Backend Python e cliente HTTP (gate.py)
 │   └── data/                       # Rotas, aliases, clientes (gerado)
 └── Workflows_para_Autenticação/
     └── Aprovacao de Acesso (Novo).json
 ```
+
+Contas, auditoria, chaves e o IP do container n8n ficam em `.n8groker/`, fora do git.
 
 ---
 
@@ -630,7 +670,7 @@ flowchart TB
     FILA -->|pendente| WAIT[Pagina aguardando]
     FILA -->|aprovado| PROXY
     FILA --> DB
-    FW -->|IP imune| PROXY
+    FW -->|loopback local| PROXY
     PROXY --> WH
 
     FILA -->|IP novo| WH
@@ -675,7 +715,7 @@ Equivalente a estado “pronto para GitHub”: apaga dados voláteis, mantém c�
 
 1. **Primeira vez (cópia limpa):** `factory_reset.bat` → **`Setup.bat`** → `iniciar_servicos.ps1` → checklist n8n (secção 16).
 2. **Importar e activar** `Aprovacao de Acesso (Novo).json` — único workflow de aprovação do projecto.
-3. **`PORTEIRO_TOKEN` é opcional** — se usar, repita o valor em `admin_token` no workflow; `.env` sozinho não basta para o Porteiro Node.
+3. **Token de aprovação é obrigatório** — dois arquivos em `.n8groker/`, não no `.env`. O workflow manda `X-Admin-Token`. Vazio ou errado é 403.
 4. **Configurar SMTP** no node `Email e Espera Aprovacao` antes de activar o workflow (ou substituir por outro node de aprovação, desde que a saída seja compatível).
 5. **Não alterar `N8N_ENCRYPTION_KEY`** após a primeira instalação (perda de credenciais criptografadas).
 6. **Rede Docker** `rede_comunicacao` — o **Setup.bat** cria automaticamente; comando manual só se o Setup não correu.
@@ -708,14 +748,16 @@ flowchart LR
 |---|--------|-------|
 | 1 | **`factory_reset.bat`** | Digite `Excluir`. Use só numa **cópia**, não na pasta principal de desenvolvimento. |
 | 2 | Resposta **S** ao `.env` | Recria `.env` a partir de `.env_template` (alternativa: copiar manualmente ou deixar o Setup criar). |
-| 3 | **`Setup.bat`** | Preenche checklist; edite `.env` com `NGROK_AUTHTOKEN`, `N8N_ENCRYPTION_KEY` e, se quiser, `PORTEIRO_TOKEN`. |
-| 4 | **`iniciar_servicos.ps1`** | Sobe Porteiro, n8n, ngrok e Scout (se `USE_SCOUT=1`). |
-| 5 | **`http://localhost:5678`** | Criar conta admin (primeiro acesso). |
+| 3 | **`Setup.bat`** | Preenche checklist; edite `.env` com `NGROK_AUTHTOKEN` e `N8N_ENCRYPTION_KEY`. O token de aprovação nasce no `iniciar_servicos.ps1`, fora do `.env`. |
+| 4 | **`iniciar_servicos.ps1`** | Sobe o console em `127.0.0.1:8501`, a borda em `127.0.0.1:8502`, o Ollama se `USE_OLLAMA_LOCAL=1`, Porteiro, ngrok, Scout (se `USE_SCOUT=1`), Langfuse/LiteLLM e o n8n em `127.0.0.1:5678`. |
+| 5 | **`http://127.0.0.1:5678`** | Criar a conta do produto n8n (primeiro acesso). Isso não é o admin do painel. |
 | 6 | Importar workflow | `Workflows_para_Autenticação/Aprovacao de Acesso (Novo).json`. |
-| 7 | Node **Configuracoes** | `admin_email`, `admin_token` (opcional), confirmar `porteiro_url`. |
+| 7 | Node **Configuracoes** | `admin_email`, `admin_token` (`{{ $env.PORTEIRO_N8N_TOKEN }}` ou o arquivo `porteiro-n8n.token`), confirmar `porteiro_url`. |
 | 8 | Node **Email e Espera Aprovacao** | Credencial SMTP. |
 | 9 | **Activar** workflow | Sem isto, o Porteiro não dispara aprovação por e-mail. |
-| 10 | Testar | Aceder à URL ngrok num browser; deve aparecer fila + e-mail ao admin. |
+| 10 | Testar | Aceder à URL ngrok num browser; deve aparecer fila + e-mail ao admin, se o workflow estiver ativo. |
+
+O admin do painel é outro passo, e não tem senha. Na raiz, `python -m control_plane.admin_token --init` cria `.n8groker/admin.key` e o comando sem `--init` imprime um JWT de 5 minutos. Cole no campo **Token de admin** de `http://localhost:8501`. A aba Admin cria as contas do painel, sem senha, e emite o JWT de usuário (**Emitir token**). A chave desse JWT é `.n8groker/usuario.key`. A borda (`/painel`, porta `8502`) aceita o token de usuário e recusa o JWT de admin. A mesma aba chama `http://127.0.0.1:5676`. Se o webhook do n8n responder 404, a fila e os botões Aprovar, Reprovar e Vincular continuam valendo.
 
 ### factory_reset vs Setup
 
@@ -729,4 +771,4 @@ flowchart LR
 
 ---
 
-*Documentação gerada com base na análise do código-fonte em maio/2026.*
+*Documentação alinhada ao código de `control-plane-plus` em outubro/2026.*

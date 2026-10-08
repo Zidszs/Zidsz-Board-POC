@@ -5,7 +5,16 @@ import uuid
 from copy import deepcopy
 from pathlib import Path
 
-from scout.core.route_config import REDIRECTIONS_FILE, RouteConfig
+from scout.core.route_config import (
+    REDIRECTIONS_FILE,
+    RouteConfig,
+    porta_hud_admin,
+    porta_reservada_porteiro,
+)
+
+
+class PortaReservadaError(ValueError):
+    """Rota que escutaria ou apontaria para o Porteiro fora da entrada oficial."""
 
 
 class RedirectionRegistry:
@@ -50,6 +59,10 @@ class RedirectionRegistry:
                     name in ("n8n_app", "ngrok_service")
                     or listen == public
                     or (name == "scout-backend" and listen == public)
+                    or porta_reservada_porteiro(listen)
+                    or porta_reservada_porteiro(e.get("upstream_port"))
+                    or porta_hud_admin(listen)
+                    or porta_hud_admin(e.get("upstream_port"))
                 ):
                     e["enabled"] = False
                     e["is_new"] = False
@@ -67,7 +80,7 @@ class RedirectionRegistry:
     def _next_listen_port(self) -> int:
         used = {e.get("listen_port") for e in self._entries if e.get("listen_port")}
         port = self.config.listen_port_start
-        while port in used:
+        while port in used or porta_reservada_porteiro(port) or porta_hud_admin(port):
             port += 1
         return port
 
@@ -90,6 +103,10 @@ class RedirectionRegistry:
         with self._lock:
             for e in self._entries:
                 if e.get("id") == entry_id:
+                    if enabled and entry_id != "porteiro-manual":
+                        self._recusar_porta_porteiro(e.get("listen_port"), e.get("upstream_port"))
+                    elif enabled:
+                        self._recusar_porta_hud(e.get("listen_port"), e.get("upstream_port"))
                     e["enabled"] = enabled
                     e["is_new"] = False
                     self._save()
@@ -101,6 +118,17 @@ class RedirectionRegistry:
         with self._lock:
             for e in self._entries:
                 if e.get("id") == entry_id:
+                    listen = fields.get("listen_port", e.get("listen_port"))
+                    upstream = fields.get("upstream_port", e.get("upstream_port"))
+                    self._recusar_porta_hud(listen, upstream)
+                    if entry_id == "porteiro-manual" and any(
+                        fields.get(chave) is not None for chave in ("listen_port", "upstream_host", "upstream_port")
+                    ):
+                        raise PortaReservadaError(
+                            "A rota porteiro-manual segue o ambiente. Escuta e destino não se alteram por aqui."
+                        )
+                    if entry_id != "porteiro-manual":
+                        self._recusar_porta_porteiro(listen, upstream)
                     for k, v in fields.items():
                         if k in allowed and v is not None:
                             e[k] = v
@@ -118,6 +146,7 @@ class RedirectionRegistry:
         listen_port: int | None = None,
         enabled: bool = False,
     ) -> dict:
+        self._recusar_porta_porteiro(listen_port, upstream_port)
         entry = {
             "id": f"manual-{uuid.uuid4().hex[:8]}",
             "source": "manual",
@@ -160,7 +189,7 @@ class RedirectionRegistry:
                 name = c.get("name", "")
                 for p in c.get("published_ports") or []:
                     host_port = p.get("host") or p.get("container")
-                    if not host_port:
+                    if not host_port or porta_reservada_porteiro(host_port) or porta_hud_admin(host_port):
                         continue
                     key = (name, host_port)
                     if key in existing_keys:
@@ -212,6 +241,24 @@ class RedirectionRegistry:
                 if hp and e.get("source") == "docker":
                     blocked.append(int(hp))
             return blocked
+
+    @staticmethod
+    def _recusar_porta_hud(listen, upstream) -> None:
+        if porta_hud_admin(listen) or porta_hud_admin(upstream):
+            raise PortaReservadaError(
+                "A porta 8501 é o HUD-admin. "
+                "Uma rota do Scout não pode escutá-la nem apontar o túnel para ela, "
+                "nem como upstream da rota porteiro-manual."
+            )
+
+    def _recusar_porta_porteiro(self, listen, upstream) -> None:
+        self._recusar_porta_hud(listen, upstream)
+        if porta_reservada_porteiro(listen) or porta_reservada_porteiro(upstream):
+            raise PortaReservadaError(
+                "As portas 5676 e 5677 são do Porteiro. "
+                "Uma rota do Scout não pode escutá-las nem apontar o túnel para elas. "
+                "A rota porteiro-manual, definida pelo ambiente, continua levando o visitante ao Porteiro."
+            )
 
     def summary(self) -> dict:
         with self._lock:

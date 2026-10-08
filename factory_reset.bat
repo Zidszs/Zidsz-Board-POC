@@ -26,7 +26,7 @@ if not "%CONFIRM%"=="Excluir" (
 )
 
 echo.
-set /p CREATE_ENV="Criar .env a partir de .env_template? (S/N): "
+set /p CREATE_ENV="Criar .env com segredos aleatorios a partir de .env.example? (S/N): "
 
 set "PS_ARGS="
 if /I "%CREATE_ENV%"=="S" set "PS_ARGS=-CreateEnvFromTemplate"

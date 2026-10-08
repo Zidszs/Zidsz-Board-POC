@@ -27,6 +27,60 @@
               "type": "string"
             },
             {
+              "id": "cfg-conta",
+              "name": "conta",
+              "value": "={{ $json.query.conta }}",
+              "type": "string"
+            },
+            {
+              "id": "cfg-dispositivo",
+              "name": "dispositivo",
+              "value": "={{ $json.query.dispositivo }}",
+              "type": "string"
+            },
+            {
+              "id": "cfg-origem",
+              "name": "origem",
+              "value": "={{ $json.query.origem }}",
+              "type": "string"
+            },
+            {
+              "id": "cfg-origem-aprovada",
+              "name": "origem_aprovada",
+              "value": "={{ $json.query.origem_aprovada }}",
+              "type": "string"
+            },
+            {
+              "id": "cfg-navegador",
+              "name": "navegador",
+              "value": "={{ $json.query.navegador }}",
+              "type": "string"
+            },
+            {
+              "id": "cfg-sistema",
+              "name": "sistema",
+              "value": "={{ $json.query.sistema }}",
+              "type": "string"
+            },
+            {
+              "id": "cfg-idioma",
+              "name": "idioma",
+              "value": "={{ $json.query.idioma }}",
+              "type": "string"
+            },
+            {
+              "id": "cfg-horario",
+              "name": "horario",
+              "value": "={{ $json.query.horario }}",
+              "type": "string"
+            },
+            {
+              "id": "cfg-pais",
+              "name": "pais",
+              "value": "={{ $json.query.pais }}",
+              "type": "string"
+            },
+            {
               "id": "cfg-url",
               "name": "porteiro_url",
               "value": "http://host.docker.internal:5677",
@@ -35,7 +89,7 @@
             {
               "id": "cfg-token",
               "name": "admin_token",
-              "value": "",
+              "value": "={{ $env.PORTEIRO_N8N_TOKEN }}",
               "type": "string"
             },
             {
@@ -59,7 +113,7 @@
         "operation": "sendAndWait",
         "sendTo": "={{ $('Configuracoes').item.json.admin_email }}",
         "subject": "Porteiro: visitante aguardando aprovacao",
-        "message": "=Um novo visitante esta tentando acessar o n8n.\n\nIP: {{ $('Configuracoes').item.json.ip }}\n\nClique abaixo para aprovar ou bloquear o acesso.",
+        "message": "=Um novo visitante esta tentando acessar o n8n.\n\nIP: {{ $('Configuracoes').item.json.ip }}\nConta: {{ $('Configuracoes').item.json.conta }}\nDispositivo: {{ $('Configuracoes').item.json.dispositivo }}\nOrigem: {{ $('Configuracoes').item.json.origem }}\nOrigem ja aprovada: {{ $('Configuracoes').item.json.origem_aprovada }}\nNavegador: {{ $('Configuracoes').item.json.navegador }}\nSistema: {{ $('Configuracoes').item.json.sistema }}\nIdioma: {{ $('Configuracoes').item.json.idioma }}\nHorario: {{ $('Configuracoes').item.json.horario }}\nPais: {{ $('Configuracoes').item.json.pais }}\n\nO pais chega vazio. Nao ha GeoIP. Clique abaixo para aprovar ou bloquear esta origem.",
         "approvalOptions": {
           "values": {
             "approvalType": "double",
@@ -110,7 +164,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $('Configuracoes').item.json.porteiro_url }}/n8n/aprovar?ip={{ $('Configuracoes').item.json.ip }}",
+        "url": "={{ $('Configuracoes').item.json.porteiro_url }}/n8n/aprovar?ip={{ $('Configuracoes').item.json.ip }}&origem={{ $('Configuracoes').item.json.origem }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -131,7 +185,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $('Configuracoes').item.json.porteiro_url }}/n8n/bloquear?ip={{ $('Configuracoes').item.json.ip }}",
+        "url": "={{ $('Configuracoes').item.json.porteiro_url }}/n8n/bloquear?ip={{ $('Configuracoes').item.json.ip }}&origem={{ $('Configuracoes').item.json.origem }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -151,7 +205,7 @@
     },
     {
       "parameters": {
-        "content": "## Como funciona\n\n1. Porteiro chama esse webhook quando um IP novo aparece (passa o IP via ?ip=...)\n2. n8n responde 'OK' instantaneamente — porteiro nao fica esperando\n3. Email com botoes 'Aprovar'/'Bloquear' eh enviado ao admin\n4. Quando o admin clica, o fluxo retoma e chama de volta o porteiro com o veredito\n\n## Antes de ativar\n\n- Configure as credenciais SMTP no node 'Email e Espera Aprovacao'\n- Edite o node 'Configuracoes':\n  - admin_email = seu email de aprovador\n  - admin_token = mesmo valor de PORTEIRO_TOKEN definido no ambiente (deixe vazio se nao usar token)\n- Desative ou apague os workflows antigos 'Ip Permit' e 'Node De Aprovacao via Email' para nao duplicar o webhook",
+        "content": "## Como funciona\n\n1. Porteiro chama esse webhook com ip, conta, dispositivo, origem, origem_aprovada, navegador, sistema, idioma, horario e pais\n2. pais chega vazio. Nao ha GeoIP.\n3. n8n responde 'OK' instantaneamente — porteiro nao fica esperando\n4. Email com botoes 'Aprovar'/'Bloquear' eh enviado ao admin\n5. Aprovar e bloquear voltam com ip e origem. Sem origem o Porteiro nao aprova dispositivo. Vincular nao e feito aqui.\n\n## Antes de ativar\n\n- Configure as credenciais SMTP no node 'Email e Espera Aprovacao'\n- Edite o node 'Configuracoes':\n  - admin_email = seu email de aprovador\n  - admin_token ja vem como {{ $env.PORTEIRO_N8N_TOKEN }}. O token e obrigatorio.\n  - Esse valor e o arquivo .n8groker/porteiro-n8n.token, nao o .env da raiz.\n  - Se o n8n recusar $env, cole o conteudo desse arquivo no campo admin_token.\n  - Campo vazio faz a aprovacao voltar 403.\n- Desative ou apague os workflows antigos 'Ip Permit' e 'Node De Aprovacao via Email' para nao duplicar o webhook\n- Um workflow ja importado nesta maquina nao muda sozinho: edite o node ou importe de novo.",
         "height": 360,
         "width": 380
       },

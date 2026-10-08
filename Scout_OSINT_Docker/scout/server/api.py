@@ -8,6 +8,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from scout.core.redirection_registry import PortaReservadaError
 from scout.server.service import get_service
 
 logger = logging.getLogger("scout.api")
@@ -36,7 +37,7 @@ class ToggleBody(BaseModel):
 
 class ManualBody(BaseModel):
     name: str
-    upstream_host: str = "127.0.0.1"
+    upstream_host: str = "host.docker.internal"
     upstream_port: int
     mode: str = "tcp"
     listen_port: int | None = None
@@ -61,6 +62,14 @@ class IpBody(BaseModel):
     ip: str
 
 
+class SidBody(BaseModel):
+    sid: str
+
+
+class AlertaBody(BaseModel):
+    id: str
+
+
 @app.get("/health")
 def health():
     svc = get_service()
@@ -73,34 +82,50 @@ def list_redirections():
     return {"entries": svc.registry.list_all(), "summary": svc.registry.summary()}
 
 
+def _resposta_rota(acao):
+    try:
+        return acao()
+    except PortaReservadaError as exc:
+        return {"ok": False, "error": str(exc)}
+
+
 @app.post("/redirections/toggle")
 def toggle_redirection(body: ToggleBody):
-    entry = get_service().toggle_redirection(body.id, body.enabled)
-    if not entry:
-        return {"ok": False, "error": "entrada não encontrada"}
-    return {"ok": True, "entry": entry}
+    def acao():
+        entry = get_service().toggle_redirection(body.id, body.enabled)
+        if not entry:
+            return {"ok": False, "error": "entrada não encontrada"}
+        return {"ok": True, "entry": entry}
+
+    return _resposta_rota(acao)
 
 
 @app.post("/redirections/manual")
 def add_manual(body: ManualBody):
-    entry = get_service().add_manual(
-        name=body.name,
-        upstream_host=body.upstream_host,
-        upstream_port=body.upstream_port,
-        mode=body.mode,
-        listen_port=body.listen_port,
-        enabled=body.enabled,
-    )
-    return {"ok": True, "entry": entry}
+    def acao():
+        entry = get_service().add_manual(
+            name=body.name,
+            upstream_host=body.upstream_host,
+            upstream_port=body.upstream_port,
+            mode=body.mode,
+            listen_port=body.listen_port,
+            enabled=body.enabled,
+        )
+        return {"ok": True, "entry": entry}
+
+    return _resposta_rota(acao)
 
 
 @app.patch("/redirections/{entry_id}")
 def update_redirection(entry_id: str, body: UpdateBody):
-    fields = body.model_dump(exclude_none=True)
-    entry = get_service().update_redirection(entry_id, **fields)
-    if not entry:
-        return {"ok": False, "error": "entrada não encontrada"}
-    return {"ok": True, "entry": entry}
+    def acao():
+        fields = body.model_dump(exclude_none=True)
+        entry = get_service().update_redirection(entry_id, **fields)
+        if not entry:
+            return {"ok": False, "error": "entrada não encontrada"}
+        return {"ok": True, "entry": entry}
+
+    return _resposta_rota(acao)
 
 
 @app.delete("/redirections/{entry_id}")
@@ -159,6 +184,44 @@ def unblock_ip(ip: str):
 @app.post("/firewall/sync")
 def firewall_sync():
     return get_service().firewall_sync()
+
+
+@app.get("/varredura")
+def listar_varredura():
+    return {"ips": get_service().varredura.listar()}
+
+
+@app.post("/varredura/desbloquear")
+def desbloquear_varredura(body: IpBody):
+    get_service().varredura.desbloquear(body.ip, "admin")
+    return {"ok": True}
+
+
+@app.get("/sessoes")
+def listar_sessoes():
+    return {"sessoes": get_service().trilha.sessoes()}
+
+
+@app.post("/sessoes/revogar")
+def revogar_sessao(body: SidBody):
+    get_service().trilha.revogar(body.sid)
+    return {"ok": True}
+
+
+@app.get("/trilha")
+def ler_trilha(ip: str = "", sid: str = ""):
+    return {"linhas": get_service().trilha.legiveis(ip, sid)}
+
+
+@app.get("/alertas")
+def listar_alertas():
+    return {"alertas": get_service().trilha.alertas()}
+
+
+@app.post("/alertas/visto")
+def marcar_alerta_visto(body: AlertaBody):
+    get_service().trilha.marcar_visto(body.id)
+    return {"ok": True}
 
 
 def _broadcast(payload):

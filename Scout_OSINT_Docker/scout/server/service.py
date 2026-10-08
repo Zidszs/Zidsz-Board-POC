@@ -1,5 +1,6 @@
 """Motor Scout Gate — MITM, redireccionamentos, firewall, tráfego."""
 import logging
+import os
 import threading
 import time
 
@@ -30,6 +31,29 @@ class ScoutGateService:
             on_session=self._on_session,
             is_blocked=self._is_blocked,
         )
+        from scout.core.politica_portal import montar_politica
+        from scout.core.porta_apps import antes_do_porteiro, fila_do_ambiente
+        from scout.core.varredura import Varredura
+
+        self.varredura = Varredura()
+        from scout.core.trilha import Trilha
+
+        self.trilha = Trilha(os.environ.get("N8GROKER_TRILHA_DIR", "/run/trilha"))
+
+        fila = fila_do_ambiente()
+        bruto = antes_do_porteiro(fila)
+
+        def _fila(pedido, client_ip, entry, _bruto=bruto):
+            return _bruto(
+                pedido,
+                client_ip,
+                entry,
+                os.environ.get("PORTEIRO_TRUSTED_PROXIES", ""),
+            )
+
+        self.proxy.antes_de_ligar = montar_politica(
+            _fila, fila=fila, varredura=self.varredura, trilha=self.trilha
+        )
         self._subscribers: list = []
         self._sub_lock = threading.Lock()
         self._tick_thread = None
@@ -39,6 +63,9 @@ class ScoutGateService:
     def start(self):
         if self._running:
             return {"ok": True, "message": "já activo"}
+        from scout.core.hmac_arquivo import avisar_hmac
+
+        avisar_hmac()
         self._running = True
         self.docker.start()
         self.proxy.start()

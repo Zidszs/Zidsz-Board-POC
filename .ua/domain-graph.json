@@ -1,0 +1,1668 @@
+{
+  "version": "1.0.0",
+  "project": {
+    "name": "N8Groker",
+    "languages": [
+      "javascript",
+      "json",
+      "markdown",
+      "powershell",
+      "python",
+      "shell",
+      "yaml"
+    ],
+    "frameworks": [
+      "Docker",
+      "Docker Compose",
+      "GitHub Actions",
+      "Streamlit",
+      "pytest"
+    ],
+    "description": "Domínios de negócio do N8Groker: quem entra pela borda, quem administra pelo Keeper, como a stack sobe, o que as duas trilhas registram e onde fica a stack LLM.",
+    "analyzedAt": "2026-10-08T16:55:48Z",
+    "gitCommitHash": "2c93264e24f86c63596ce7fd3055d46c2a158b10"
+  },
+  "nodes": [
+    {
+      "id": "domain:acesso-pela-borda",
+      "type": "domain",
+      "name": "Acesso pela borda",
+      "summary": "É o caminho de quem chega pela URL do ngrok. O Scout decide o IP, a origem e a sessão. O Porteiro confirma a tríade antes de qualquer app.",
+      "tags": [
+        "borda",
+        "sessao",
+        "origem"
+      ],
+      "complexity": "complex",
+      "domainMeta": {
+        "entities": [
+          "visitante",
+          "origem",
+          "sessao",
+          "app"
+        ],
+        "businessRules": [
+          "Sem sessão, a raiz responde 403 e o texto não revela o painel.",
+          "origem.js é servido pelo Scout, nunca pelo Streamlit.",
+          "A segunda origem no mesmo IP fica pendente.",
+          "No túnel com Scout o 202 é de porta_apps.py. paginaAnalise no Porteiro é o caminho antigo, com o túnel na 5677."
+        ],
+        "crossDomainInteractions": [
+          "Pede aprovação ao Porteiro",
+          "Abre o app escolhido no n8n ou na stack LLM",
+          "Grava checkpoint na trilha"
+        ]
+      }
+    },
+    {
+      "id": "domain:contas-e-admin",
+      "type": "domain",
+      "name": "Contas e administração",
+      "summary": "O console em 127.0.0.1:8501 cria contas e aprova dispositivos. O admin cola um JWT curto. O Keeper emite, revoga e gira chaves. A borda não aceita o token de admin.",
+      "tags": [
+        "admin",
+        "conta",
+        "jwt"
+      ],
+      "complexity": "complex",
+      "domainMeta": {
+        "entities": [
+          "conta",
+          "papel",
+          "jwt de admin",
+          "geracao"
+        ],
+        "businessRules": [
+          "Não há auto-cadastro nem senha.",
+          "O Keeper emite o JWT de usuário. O painel não lê a privada.",
+          "Girar a chave de usuário sobe a geração da conta e derruba o cookie. O JWT de admin não usa essa chave."
+        ],
+        "crossDomainInteractions": [
+          "A aprovação libera a origem na borda",
+          "A geração da conta derruba o cookie n8groker_sessao"
+        ]
+      }
+    },
+    {
+      "id": "domain:boot-e-infra",
+      "type": "domain",
+      "name": "Boot e infraestrutura",
+      "summary": "O script de Windows sobe a stack na ordem certa, cria os arquivos que o Docker vai montar e cria maquina.key fora de volume, para o Keeper.",
+      "tags": [
+        "boot",
+        "docker",
+        "powershell"
+      ],
+      "complexity": "complex",
+      "domainMeta": {
+        "entities": [
+          "compose",
+          "montagem",
+          "maquina.key",
+          "NODES_EXCLUDE"
+        ],
+        "businessRules": [
+          "Arquivo de montagem nasce antes do compose.",
+          "O ngrok só aponta para o Scout depois da saúde.",
+          "A imagem do n8n lê NODES_EXCLUDE em JSON.",
+          "maquina.key nasce no boot se faltar ou estiver vazia. Não é montada e não entra no .env."
+        ],
+        "crossDomainInteractions": [
+          "Entrega o túnel para a borda",
+          "Publica n8n e a stack LLM só em loopback"
+        ]
+      }
+    },
+    {
+      "id": "domain:observabilidade",
+      "type": "domain",
+      "name": "Trilha e alertas",
+      "summary": "trilha.jsonl guarda LIBERADO e BLOQUEIO, com sid e conta. auth.jsonl guarda os passos auth.* e não entra no alerta. O alerta avisa o operador e não muda o veredito.",
+      "tags": [
+        "trilha",
+        "alerta",
+        "sessao"
+      ],
+      "complexity": "complex",
+      "domainMeta": {
+        "entities": [
+          "checkpoint",
+          "sid",
+          "alerta",
+          "auth.jsonl"
+        ],
+        "businessRules": [
+          "Senha, token e cookie não entram na linha.",
+          "Revogar um sid derruba só aquela sessão.",
+          "Alerta não bloqueia um acesso já liberado.",
+          "auth.jsonl não dispara o webhook da trilha."
+        ],
+        "crossDomainInteractions": [
+          "Lê a sessão emitida na borda",
+          "Pode chamar o webhook do n8n"
+        ]
+      }
+    },
+    {
+      "id": "domain:stack-llm",
+      "type": "domain",
+      "name": "Stack LLM",
+      "summary": "Langfuse e LiteLLM sobem para o laboratório. O litellm_config.yaml não cadastra provider. No boot, a master key gerada vira CREDENTIALS_OVERWRITE_DATA e a credencial openAiApi do n8n aponta para http://litellm:4000/v1.",
+      "tags": [
+        "llm",
+        "langfuse",
+        "litellm"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entities": [
+          "Langfuse",
+          "LiteLLM",
+          "Postgres"
+        ],
+        "businessRules": [
+          "As portas publicadas ficam em 127.0.0.1.",
+          "Pelo túnel, esses apps também passam pelo Porteiro.",
+          "A credencial do n8n usa a master key gerada. O yaml do LiteLLM continua sem provider."
+        ],
+        "crossDomainInteractions": [
+          "É um app que a conta pode abrir na borda"
+        ]
+      }
+    },
+    {
+      "id": "flow:visitante-novo",
+      "type": "flow",
+      "name": "Visitante novo",
+      "summary": "Um IP ainda não aprovado vê a página 202 do Scout e registra a origem antes de o admin aprovar.",
+      "tags": [
+        "fluxo",
+        "acesso-pela-borda"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "GET /painel",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "flow:abrir-app",
+      "type": "flow",
+      "name": "Abrir o app",
+      "summary": "O fluxo começa no login da borda. O ticket e o /painel/escolher emitem a sessão, o Porteiro confirma e a raiz passa a ser o app.",
+      "tags": [
+        "fluxo",
+        "acesso-pela-borda"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "Login no painel da borda",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "flow:segunda-origem",
+      "type": "flow",
+      "name": "Segunda origem no mesmo IP",
+      "summary": "Outro navegador no IP já aprovado registra uma origem nova, que fica pendente.",
+      "tags": [
+        "fluxo",
+        "acesso-pela-borda"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "GET /origem.js de outro navegador",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "flow:revogar-sessao",
+      "type": "flow",
+      "name": "Revogar uma sessão",
+      "summary": "O admin revoga um sid. Só o cookie daquela sessão deixa de passar.",
+      "tags": [
+        "fluxo",
+        "acesso-pela-borda"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "Aba Scout do console",
+        "entryType": "manual"
+      }
+    },
+    {
+      "id": "flow:login-admin",
+      "type": "flow",
+      "name": "Entrar como admin",
+      "summary": "O operador emite um JWT na máquina e cola no console. A borda recusa o mesmo token.",
+      "tags": [
+        "fluxo",
+        "contas-e-admin"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "python -m control_plane.admin_token",
+        "entryType": "cli"
+      }
+    },
+    {
+      "id": "flow:reset-de-senha",
+      "type": "flow",
+      "name": "Girar a chave de usuário",
+      "summary": "Girar usuario.key sobe a geração de cada conta e derruba o cookie na próxima requisição. O JWT de admin não usa essa chave.",
+      "tags": [
+        "fluxo",
+        "contas-e-admin"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "Rotação da chave de usuário pelo Keeper",
+        "entryType": "manual"
+      }
+    },
+    {
+      "id": "flow:subida-da-stack",
+      "type": "flow",
+      "name": "Subida da stack",
+      "summary": "O boot cria segredos em arquivo, sobe o Scout, o túnel e o n8n, e confirma a variável que a imagem realmente lê.",
+      "tags": [
+        "fluxo",
+        "boot-e-infra"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": ".\\iniciar_servicos.ps1",
+        "entryType": "cli"
+      }
+    },
+    {
+      "id": "flow:trilha-e-alerta",
+      "type": "flow",
+      "name": "Trilha e alerta",
+      "summary": "A borda grava o caminho do visitante e, se a regra disparar, avisa sem bloquear.",
+      "tags": [
+        "fluxo",
+        "observabilidade"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "Checkpoint da trilha",
+        "entryType": "event"
+      }
+    },
+    {
+      "id": "flow:abrir-litellm",
+      "type": "flow",
+      "name": "Abrir LiteLLM ou Langfuse",
+      "summary": "Quem já escolheu o LiteLLM chega na raiz pelo mesmo portão da borda. Subir o compose é o boot, não o primeiro passo deste fluxo. No host, as portas continuam em loopback.",
+      "tags": [
+        "fluxo",
+        "stack-llm"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "GET / depois de escolher litellm",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "step:visitante-novo:pagina-202",
+      "type": "step",
+      "name": "Página 202",
+      "summary": "No túnel com Scout, porta_apps.py responde 202. O Streamlit não entra.",
+      "tags": [
+        "passo",
+        "acesso-pela-borda"
+      ],
+      "complexity": "moderate",
+      "filePath": "Scout_OSINT_Docker/scout/core/porta_apps.py",
+      "domainMeta": {
+        "entryPoint": "GET /painel",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "step:visitante-novo:origem-js",
+      "type": "step",
+      "name": "Script de origem",
+      "summary": "O navegador carrega origem.js como JavaScript e gera a chave ECDSA.",
+      "tags": [
+        "passo",
+        "acesso-pela-borda"
+      ],
+      "complexity": "moderate",
+      "filePath": "Scout_OSINT_Docker/scout/static/origem.js",
+      "domainMeta": {
+        "entryPoint": "GET /origem.js",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "step:visitante-novo:registrar",
+      "type": "step",
+      "name": "Registrar origem",
+      "summary": "O Scout grava a origem na fila com o token de admin. O IP da query é ignorado.",
+      "tags": [
+        "passo",
+        "acesso-pela-borda"
+      ],
+      "complexity": "moderate",
+      "filePath": "Scout_OSINT_Docker/scout/core/politica_portal.py",
+      "domainMeta": {
+        "entryPoint": "POST /painel/registrar-origem",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "step:visitante-novo:aprovar",
+      "type": "step",
+      "name": "Aprovar e vincular",
+      "summary": "No console, o admin aprova a origem e vincula a conta. Sem origem, a aprovação não marca dispositivo.",
+      "tags": [
+        "passo",
+        "acesso-pela-borda"
+      ],
+      "complexity": "moderate",
+      "filePath": "control_plane/porteiro_admin.py",
+      "domainMeta": {
+        "entryPoint": "127.0.0.1:5676 aprovar e vincular",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "step:abrir-app:login",
+      "type": "step",
+      "name": "Login na borda",
+      "summary": "A conta cola o JWT no Streamlit da borda. Não há senha.",
+      "tags": [
+        "passo",
+        "acesso-pela-borda"
+      ],
+      "complexity": "moderate",
+      "filePath": "control_plane/app.py",
+      "domainMeta": {
+        "entryPoint": "Login no painel da borda",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "step:abrir-app:ticket",
+      "type": "step",
+      "name": "Ticket HMAC",
+      "summary": "O painel assina um ticket curto com conta, IP e geração.",
+      "tags": [
+        "passo",
+        "acesso-pela-borda"
+      ],
+      "complexity": "moderate",
+      "filePath": "control_plane/sessao_borda.py",
+      "domainMeta": {
+        "entryPoint": "Ticket HMAC no painel",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "step:abrir-app:escolher",
+      "type": "step",
+      "name": "Escolher o app",
+      "summary": "O Scout confere o ticket e a prova da origem, grava sid e conta na trilha e emite o cookie n8groker_sessao.",
+      "tags": [
+        "passo",
+        "acesso-pela-borda"
+      ],
+      "complexity": "moderate",
+      "filePath": "Scout_OSINT_Docker/scout/core/politica_portal.py",
+      "domainMeta": {
+        "entryPoint": "GET /painel/escolher",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "step:abrir-app:porteiro",
+      "type": "step",
+      "name": "Porteiro",
+      "summary": "Antes do upstream, o Scout confirma conta, IP e origem aprovados.",
+      "tags": [
+        "passo",
+        "acesso-pela-borda"
+      ],
+      "complexity": "moderate",
+      "filePath": "Porteiro/porteiro.js",
+      "domainMeta": {
+        "entryPoint": "Consulta a 127.0.0.1:5676",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "step:abrir-app:liberado",
+      "type": "step",
+      "name": "Raiz liberada",
+      "summary": "A raiz com o cookie é o app. A trilha grava LIBERADO com sid e conta.",
+      "tags": [
+        "passo",
+        "acesso-pela-borda"
+      ],
+      "complexity": "moderate",
+      "filePath": "Scout_OSINT_Docker/scout/core/trilha.py",
+      "domainMeta": {
+        "entryPoint": "GET / com sessão",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "step:segunda-origem:script",
+      "type": "step",
+      "name": "origem.js de novo",
+      "summary": "O segundo perfil baixa o JavaScript do Scout, não o HTML do Streamlit.",
+      "tags": [
+        "passo",
+        "acesso-pela-borda"
+      ],
+      "complexity": "moderate",
+      "filePath": "Scout_OSINT_Docker/scout/static/origem.js",
+      "domainMeta": {
+        "entryPoint": "GET /origem.js de outro navegador",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "step:segunda-origem:pendente",
+      "type": "step",
+      "name": "Fica pendente",
+      "summary": "A origem nova entra na fila sem aprovar. A origem antiga continua aprovada.",
+      "tags": [
+        "passo",
+        "acesso-pela-borda"
+      ],
+      "complexity": "moderate",
+      "filePath": "Porteiro/origens.js",
+      "domainMeta": {
+        "entryPoint": "Registro da origem nova",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "step:revogar-sessao:lista",
+      "type": "step",
+      "name": "Listar sessões",
+      "summary": "A aba Scout mostra sid, origem, conta, IP e app.",
+      "tags": [
+        "passo",
+        "acesso-pela-borda"
+      ],
+      "complexity": "moderate",
+      "filePath": "control_plane/scout_panel.py",
+      "domainMeta": {
+        "entryPoint": "Aba Scout do console",
+        "entryType": "manual"
+      }
+    },
+    {
+      "id": "step:revogar-sessao:revogar",
+      "type": "step",
+      "name": "Revogar o sid",
+      "summary": "A revogação marca aquele sid. A outra sessão no mesmo IP continua.",
+      "tags": [
+        "passo",
+        "acesso-pela-borda"
+      ],
+      "complexity": "moderate",
+      "filePath": "Scout_OSINT_Docker/scout/core/sessao_cookie.py",
+      "domainMeta": {
+        "entryPoint": "Revogar o sid",
+        "entryType": "manual"
+      }
+    },
+    {
+      "id": "step:revogar-sessao:raiz",
+      "type": "step",
+      "name": "Raiz da sessão revogada",
+      "summary": "O próximo pedido daquele cookie recebe 403.",
+      "tags": [
+        "passo",
+        "acesso-pela-borda"
+      ],
+      "complexity": "moderate",
+      "filePath": "Scout_OSINT_Docker/scout/core/politica_portal.py",
+      "domainMeta": {
+        "entryPoint": "GET / da sessão revogada",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "step:login-admin:emitir",
+      "type": "step",
+      "name": "Emitir JWT",
+      "summary": "O comando assina um token Ed25519 de cinco minutos.",
+      "tags": [
+        "passo",
+        "contas-e-admin"
+      ],
+      "complexity": "moderate",
+      "filePath": "control_plane/admin_token.py",
+      "domainMeta": {
+        "entryPoint": "python -m control_plane.admin_token",
+        "entryType": "cli"
+      }
+    },
+    {
+      "id": "step:login-admin:console",
+      "type": "step",
+      "name": "Colar no console",
+      "summary": "O console 8501 aceita o token. A borda 8502 não aceita.",
+      "tags": [
+        "passo",
+        "contas-e-admin"
+      ],
+      "complexity": "moderate",
+      "filePath": "control_plane/app.py",
+      "domainMeta": {
+        "entryPoint": "Colar o JWT no console 8501",
+        "entryType": "manual"
+      }
+    },
+    {
+      "id": "step:login-admin:console-aceita-o-jwt",
+      "type": "step",
+      "name": "Console aceita o JWT",
+      "summary": "O console de 8501 aceita o JWT. Criar a conta é o que o admin faz depois, não o fechamento do login.",
+      "tags": [
+        "passo",
+        "contas-e-admin"
+      ],
+      "complexity": "moderate",
+      "filePath": "control_plane/app.py",
+      "domainMeta": {
+        "entryPoint": "Console aceita o JWT",
+        "entryType": "manual"
+      }
+    },
+    {
+      "id": "step:reset-de-senha:gravar",
+      "type": "step",
+      "name": "Gravar a geração",
+      "summary": "A geração é escrita no mesmo arquivo montado, sem trocar o inode.",
+      "tags": [
+        "passo",
+        "contas-e-admin"
+      ],
+      "complexity": "moderate",
+      "filePath": "Scout_OSINT_Docker/scout/core/gravar_arquivo.py",
+      "domainMeta": {
+        "entryPoint": "Gravar a geração da conta",
+        "entryType": "manual"
+      }
+    },
+    {
+      "id": "step:reset-de-senha:cookie-cai",
+      "type": "step",
+      "name": "Cai o cookie do usuário",
+      "summary": "A sessão da borda daquela conta deixa de conferir.",
+      "tags": [
+        "passo",
+        "contas-e-admin"
+      ],
+      "complexity": "moderate",
+      "filePath": "Scout_OSINT_Docker/scout/core/sessao_cookie.py",
+      "domainMeta": {
+        "entryPoint": "Cookie da conta invalidado",
+        "entryType": "event"
+      }
+    },
+    {
+      "id": "step:reset-de-senha:admin-fica",
+      "type": "step",
+      "name": "O admin continua",
+      "summary": "O JWT de admin não depende da geração da conta nem de usuario.key.",
+      "tags": [
+        "passo",
+        "contas-e-admin"
+      ],
+      "complexity": "moderate",
+      "filePath": "control_plane/admin_token.py",
+      "domainMeta": {
+        "entryPoint": "JWT de admin segue válido",
+        "entryType": "event"
+      }
+    },
+    {
+      "id": "step:subida-da-stack:arquivos",
+      "type": "step",
+      "name": "Arquivos antes do compose",
+      "summary": "Chave HMAC, tokens, sessao.key, usuario.key, geração, auditoria e a pasta da trilha existem antes do Docker. maquina.key nasce no boot e não é montada.",
+      "tags": [
+        "passo",
+        "boot-e-infra"
+      ],
+      "complexity": "moderate",
+      "filePath": "iniciar_servicos.ps1",
+      "domainMeta": {
+        "entryPoint": ".\\iniciar_servicos.ps1",
+        "entryType": "cli"
+      }
+    },
+    {
+      "id": "step:subida-da-stack:scout",
+      "type": "step",
+      "name": "Scout e depois o ngrok",
+      "summary": "O Scout fica saudável e o ngrok aponta para scout-backend na rede.",
+      "tags": [
+        "passo",
+        "boot-e-infra"
+      ],
+      "complexity": "moderate",
+      "filePath": "ngrok/docker-compose.yml",
+      "domainMeta": {
+        "entryPoint": "Scout saudável e depois o ngrok",
+        "entryType": "cli"
+      }
+    },
+    {
+      "id": "step:subida-da-stack:nodes",
+      "type": "step",
+      "name": "NODES_EXCLUDE",
+      "summary": "O script converte a lista do .env e o log mostra printenv NODES_EXCLUDE dentro do n8n.",
+      "tags": [
+        "passo",
+        "boot-e-infra"
+      ],
+      "complexity": "moderate",
+      "filePath": "n8n/docker-compose.yml",
+      "domainMeta": {
+        "entryPoint": "printenv NODES_EXCLUDE",
+        "entryType": "cli"
+      }
+    },
+    {
+      "id": "step:trilha-e-alerta:checkpoint",
+      "type": "step",
+      "name": "Gravar checkpoint",
+      "summary": "Login, escolher e LIBERADO levam sid e conta.",
+      "tags": [
+        "passo",
+        "observabilidade"
+      ],
+      "complexity": "moderate",
+      "filePath": "Scout_OSINT_Docker/scout/core/trilha.py",
+      "domainMeta": {
+        "entryPoint": "Checkpoint da trilha",
+        "entryType": "event"
+      }
+    },
+    {
+      "id": "step:trilha-e-alerta:ver",
+      "type": "step",
+      "name": "Ver na aba",
+      "summary": "Só o admin, e só fora da borda, lê a trilha no console.",
+      "tags": [
+        "passo",
+        "observabilidade"
+      ],
+      "complexity": "moderate",
+      "filePath": "control_plane/trilha_painel.py",
+      "domainMeta": {
+        "entryPoint": "Aba da trilha no console",
+        "entryType": "manual"
+      }
+    },
+    {
+      "id": "step:trilha-e-alerta:webhook",
+      "type": "step",
+      "name": "Avisar o n8n",
+      "summary": "O alerta faz GET no webhook alerta-trilha, sem token.",
+      "tags": [
+        "passo",
+        "observabilidade"
+      ],
+      "complexity": "moderate",
+      "filePath": "Workflows_para_Autenticação/Alerta de trilha.json",
+      "domainMeta": {
+        "entryPoint": "GET /webhook/alerta-trilha",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "step:abrir-litellm:porteiro",
+      "type": "step",
+      "name": "Mesma segunda checagem",
+      "summary": "LiteLLM e Langfuse também consultam o Porteiro antes do upstream.",
+      "tags": [
+        "passo",
+        "stack-llm"
+      ],
+      "complexity": "moderate",
+      "filePath": "Scout_OSINT_Docker/scout/core/porta_apps.py",
+      "domainMeta": {
+        "entryPoint": "Segunda checagem do LiteLLM",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "step:subida-da-stack:porteiro",
+      "type": "step",
+      "name": "Porteiro no ar",
+      "summary": "Start-Porteiro sobe porteiro.js em 5677 e 5676 antes de o túnel receber gente.",
+      "tags": [
+        "passo",
+        "boot-e-infra"
+      ],
+      "complexity": "moderate",
+      "filePath": "Porteiro/porteiro.js",
+      "domainMeta": {
+        "entryPoint": "Start-Porteiro",
+        "entryType": "cli"
+      }
+    },
+    {
+      "id": "step:subida-da-stack:console",
+      "type": "step",
+      "name": "Console e painel",
+      "summary": "Start-ControlPlane abre o 8501 e Start-PainelBorda abre o 8502, os dois em app.py.",
+      "tags": [
+        "passo",
+        "boot-e-infra"
+      ],
+      "complexity": "moderate",
+      "filePath": "control_plane/app.py",
+      "domainMeta": {
+        "entryPoint": "Start-ControlPlane e Start-PainelBorda",
+        "entryType": "cli"
+      }
+    },
+    {
+      "id": "step:subida-da-stack:stack-llm",
+      "type": "step",
+      "name": "Stack LLM",
+      "summary": "O compose da stack sobe Langfuse e LiteLLM na rede Docker, se as chaves do .env já existem.",
+      "tags": [
+        "passo",
+        "boot-e-infra"
+      ],
+      "complexity": "moderate",
+      "filePath": "llm/docker-compose.yml",
+      "domainMeta": {
+        "entryPoint": "docker compose da stack LLM",
+        "entryType": "cli"
+      }
+    },
+    {
+      "id": "step:subida-da-stack:api-local",
+      "type": "step",
+      "name": "API local do Scout",
+      "summary": "A API em 127.0.0.1:8765 sobe com o Scout. Ela não é o portal que o ngrok usa.",
+      "tags": [
+        "passo",
+        "boot-e-infra"
+      ],
+      "complexity": "simple",
+      "filePath": "Scout_OSINT_Docker/scout/server/service.py",
+      "domainMeta": {
+        "entryPoint": "API 127.0.0.1:8765",
+        "entryType": "cli"
+      }
+    },
+    {
+      "id": "step:subida-da-stack:suite",
+      "type": "step",
+      "name": "Suíte sem subir a stack",
+      "summary": "pytest e o PSScriptAnalyzer cobrem o boot e a borda. O CI não executa iniciar_servicos.ps1.",
+      "tags": [
+        "passo",
+        "boot-e-infra"
+      ],
+      "complexity": "moderate",
+      "filePath": "tests/test_fluxo_diario.py",
+      "domainMeta": {
+        "entryPoint": "pytest e PSScriptAnalyzer",
+        "entryType": "cli"
+      }
+    },
+    {
+      "id": "step:abrir-litellm:raiz",
+      "type": "step",
+      "name": "Raiz do LiteLLM",
+      "summary": "Com litellm na sessão, a raiz do túnel é o proxy. Este é o primeiro passo do fluxo.",
+      "tags": [
+        "passo",
+        "stack-llm"
+      ],
+      "complexity": "moderate",
+      "filePath": "Scout_OSINT_Docker/scout/core/politica_portal.py",
+      "domainMeta": {
+        "entryPoint": "GET / depois de escolher litellm",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "document:README.md",
+      "type": "document",
+      "name": "README.md",
+      "filePath": "README.md",
+      "summary": "Entrada do projeto: as duas versões, as portas, o boot no Windows e o comportamento da borda. Aponta o guia docs/ENTENDA-O-PROJETO.md e o comando do mapa interativo.",
+      "tags": [
+        "documentacao",
+        "guia"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "document:docs/ENTENDA-O-PROJETO.md",
+      "type": "document",
+      "name": "ENTENDA-O-PROJETO.md",
+      "filePath": "docs/ENTENDA-O-PROJETO.md",
+      "summary": "Guia em português para operar o ambiente: arquitetura, portas, fluxos e como abrir o viewer no Windows.",
+      "tags": [
+        "documentacao",
+        "guia"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "document:DOCUMENTACAO.md",
+      "type": "document",
+      "name": "DOCUMENTACAO.md",
+      "filePath": "DOCUMENTACAO.md",
+      "summary": "Guia técnico das portas, da ordem do boot, do Porteiro e do caminho da borda.",
+      "tags": [
+        "documentacao",
+        "guia"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "flow:caminho-antigo-202",
+      "type": "flow",
+      "name": "Página 202 antiga",
+      "summary": "Quando o túnel cai direto na 5677, o Porteiro ainda responde 202. O uso diário, com o Scout na frente, não passa por aqui.",
+      "tags": [
+        "fluxo",
+        "acesso-pela-borda"
+      ],
+      "complexity": "simple",
+      "domainMeta": {
+        "entryPoint": "GET /painel na porta 5677",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "step:caminho-antigo-202:pagina",
+      "type": "step",
+      "name": "paginaAnalise",
+      "summary": "O Porteiro monta o HTML 202. painel.test.js cobre este caminho antigo.",
+      "tags": [
+        "passo",
+        "acesso-pela-borda"
+      ],
+      "complexity": "simple",
+      "filePath": "Porteiro/porteiro.js",
+      "domainMeta": {
+        "entryPoint": "GET /painel na porta 5677",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "flow:giro-do-admin",
+      "type": "flow",
+      "name": "Girar a chave de admin",
+      "summary": "O Keeper troca admin.key depois de subir admin-geracao. Não há folga. A sessão admin já aberta cai quando o número do disco fica maior. Colar um token novo continua sendo a entrada.",
+      "tags": [
+        "fluxo",
+        "contas-e-admin"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "python -m control_plane.keeper rotacionar",
+        "entryType": "cli"
+      }
+    },
+    {
+      "id": "step:giro-do-admin:keeper",
+      "type": "step",
+      "name": "Keeper sem porta",
+      "summary": "Um processo por pedido, uma linha JSON, prazo de 3 segundos. A linha não traz a privada. abrir não cria nada.",
+      "tags": [
+        "passo",
+        "contas-e-admin"
+      ],
+      "complexity": "moderate",
+      "filePath": "control_plane/keeper.py",
+      "domainMeta": {
+        "entryPoint": "python -m control_plane.keeper",
+        "entryType": "cli"
+      }
+    },
+    {
+      "id": "step:giro-do-admin:geracao",
+      "type": "step",
+      "name": "Geração antes da chave",
+      "summary": "O contador sobe antes da troca. Se admin-geracao falta ou é ilegível, o número novo fica acima do que uma sessão já recebeu, até o teto.",
+      "tags": [
+        "passo",
+        "contas-e-admin"
+      ],
+      "complexity": "moderate",
+      "filePath": "control_plane/admin_token.py",
+      "domainMeta": {
+        "entryPoint": "Rotação da chave de admin",
+        "entryType": "cli"
+      }
+    },
+    {
+      "id": "step:giro-do-admin:maquina",
+      "type": "step",
+      "name": "maquina.key no boot",
+      "summary": "O boot cria maquina.key se faltar ou estiver vazia e não reescreve se já tem bytes. A tecla Q só mata o PID se a linha de comando for a do Keeper.",
+      "tags": [
+        "passo",
+        "boot-e-infra"
+      ],
+      "complexity": "moderate",
+      "filePath": "scripts/keeper_boot.ps1",
+      "domainMeta": {
+        "entryPoint": ".\\iniciar_servicos.ps1",
+        "entryType": "cli"
+      }
+    },
+    {
+      "id": "step:giro-do-admin:inventario",
+      "type": "step",
+      "name": "Inventário sem a privada",
+      "summary": "A aba Admin não lê a privada. maquina.key aparece como sim ou não. O kid sai do hash da pública de usuário.",
+      "tags": [
+        "passo",
+        "contas-e-admin"
+      ],
+      "complexity": "moderate",
+      "filePath": "control_plane/inventario.py",
+      "domainMeta": {
+        "entryPoint": "Aba Admin do console",
+        "entryType": "manual"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "domain:acesso-pela-borda",
+      "target": "flow:visitante-novo",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "domain:acesso-pela-borda",
+      "target": "flow:abrir-app",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "domain:acesso-pela-borda",
+      "target": "flow:segunda-origem",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "domain:acesso-pela-borda",
+      "target": "flow:revogar-sessao",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "domain:contas-e-admin",
+      "target": "flow:login-admin",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "domain:contas-e-admin",
+      "target": "flow:reset-de-senha",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "domain:boot-e-infra",
+      "target": "flow:subida-da-stack",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "domain:observabilidade",
+      "target": "flow:trilha-e-alerta",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "domain:stack-llm",
+      "target": "flow:abrir-litellm",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "domain:acesso-pela-borda",
+      "target": "domain:contas-e-admin",
+      "type": "cross_domain",
+      "direction": "forward",
+      "weight": 0.6,
+      "description": "A aprovação e o vínculo nascem no console e liberam a origem na borda."
+    },
+    {
+      "source": "domain:contas-e-admin",
+      "target": "domain:acesso-pela-borda",
+      "type": "cross_domain",
+      "direction": "forward",
+      "weight": 0.6,
+      "description": "Girar a chave de usuário sobe a geração e derruba o cookie da conta, sem derrubar o JWT de admin."
+    },
+    {
+      "source": "domain:boot-e-infra",
+      "target": "domain:acesso-pela-borda",
+      "type": "cross_domain",
+      "direction": "forward",
+      "weight": 0.6,
+      "description": "O boot deixa o Scout e o ngrok prontos para receber o visitante."
+    },
+    {
+      "source": "domain:acesso-pela-borda",
+      "target": "domain:observabilidade",
+      "type": "cross_domain",
+      "direction": "forward",
+      "weight": 0.6,
+      "description": "Cada decisão da borda vira checkpoint. Revogar um sid é fluxo da borda, não das contas."
+    },
+    {
+      "source": "domain:acesso-pela-borda",
+      "target": "domain:stack-llm",
+      "type": "cross_domain",
+      "direction": "forward",
+      "weight": 0.6,
+      "description": "Langfuse e LiteLLM são apps escolhidos no HUD e servidos na raiz."
+    },
+    {
+      "source": "domain:observabilidade",
+      "target": "domain:boot-e-infra",
+      "type": "cross_domain",
+      "direction": "forward",
+      "weight": 0.5,
+      "description": "O alerta opcional chama o webhook do n8n que o boot subiu."
+    },
+    {
+      "source": "flow:visitante-novo",
+      "target": "step:visitante-novo:pagina-202",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.25,
+      "description": "Passo 1 de 4. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "flow:visitante-novo",
+      "target": "step:visitante-novo:origem-js",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.5,
+      "description": "Passo 2 de 4. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "flow:visitante-novo",
+      "target": "step:visitante-novo:registrar",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.75,
+      "description": "Passo 3 de 4. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "flow:visitante-novo",
+      "target": "step:visitante-novo:aprovar",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0,
+      "description": "Passo 4 de 4. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "flow:abrir-app",
+      "target": "step:abrir-app:login",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.2,
+      "description": "Passo 1 de 5. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "flow:abrir-app",
+      "target": "step:abrir-app:ticket",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.4,
+      "description": "Passo 2 de 5. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "flow:abrir-app",
+      "target": "step:abrir-app:escolher",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.6,
+      "description": "Passo 3 de 5. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "flow:abrir-app",
+      "target": "step:abrir-app:porteiro",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.8,
+      "description": "Passo 4 de 5. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "flow:abrir-app",
+      "target": "step:abrir-app:liberado",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0,
+      "description": "Passo 5 de 5. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "flow:segunda-origem",
+      "target": "step:segunda-origem:script",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.5,
+      "description": "Passo 1 de 2. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "flow:segunda-origem",
+      "target": "step:segunda-origem:pendente",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0,
+      "description": "Passo 2 de 2. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "flow:revogar-sessao",
+      "target": "step:revogar-sessao:lista",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.33,
+      "description": "Passo 1 de 3. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "flow:revogar-sessao",
+      "target": "step:revogar-sessao:revogar",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.67,
+      "description": "Passo 2 de 3. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "flow:revogar-sessao",
+      "target": "step:revogar-sessao:raiz",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0,
+      "description": "Passo 3 de 3. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "flow:login-admin",
+      "target": "step:login-admin:emitir",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.33,
+      "description": "Passo 1 de 3. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "flow:login-admin",
+      "target": "step:login-admin:console",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.67,
+      "description": "Passo 2 de 3. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "flow:login-admin",
+      "target": "step:login-admin:console-aceita-o-jwt",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0,
+      "description": "Passo 3 de 3. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "flow:reset-de-senha",
+      "target": "step:reset-de-senha:gravar",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.33,
+      "description": "Passo 1 de 3. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "flow:reset-de-senha",
+      "target": "step:reset-de-senha:cookie-cai",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.67,
+      "description": "Passo 2 de 3. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "flow:reset-de-senha",
+      "target": "step:reset-de-senha:admin-fica",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0,
+      "description": "Passo 3 de 3. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "flow:trilha-e-alerta",
+      "target": "step:trilha-e-alerta:checkpoint",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.33,
+      "description": "Passo 1 de 3. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "flow:trilha-e-alerta",
+      "target": "step:trilha-e-alerta:ver",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.67,
+      "description": "Passo 2 de 3. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "flow:trilha-e-alerta",
+      "target": "step:trilha-e-alerta:webhook",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0,
+      "description": "Passo 3 de 3. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "flow:abrir-litellm",
+      "target": "step:abrir-litellm:raiz",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.5,
+      "description": "Passo 1 de 2. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "flow:abrir-litellm",
+      "target": "step:abrir-litellm:porteiro",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0,
+      "description": "Passo 2 de 2. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "flow:subida-da-stack",
+      "target": "step:subida-da-stack:arquivos",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.12,
+      "description": "Passo 1 de 8. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "flow:subida-da-stack",
+      "target": "step:subida-da-stack:porteiro",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.25,
+      "description": "Passo 2 de 8. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "flow:subida-da-stack",
+      "target": "step:subida-da-stack:scout",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.38,
+      "description": "Passo 3 de 8. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "flow:subida-da-stack",
+      "target": "step:subida-da-stack:console",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.5,
+      "description": "Passo 4 de 8. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "flow:subida-da-stack",
+      "target": "step:subida-da-stack:stack-llm",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.62,
+      "description": "Passo 5 de 8. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "flow:subida-da-stack",
+      "target": "step:subida-da-stack:api-local",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.75,
+      "description": "Passo 6 de 8. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "flow:subida-da-stack",
+      "target": "step:subida-da-stack:nodes",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.88,
+      "description": "Passo 7 de 8. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "flow:subida-da-stack",
+      "target": "step:subida-da-stack:suite",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0,
+      "description": "Passo 8 de 8. O peso só guarda esta ordem para o viewer."
+    },
+    {
+      "source": "document:README.md",
+      "target": "domain:acesso-pela-borda",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5,
+      "description": "O README apresenta a borda."
+    },
+    {
+      "source": "document:docs/ENTENDA-O-PROJETO.md",
+      "target": "domain:acesso-pela-borda",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.5,
+      "description": "O guia explica a borda e como abrir o mapa."
+    },
+    {
+      "source": "document:DOCUMENTACAO.md",
+      "target": "domain:boot-e-infra",
+      "type": "documents",
+      "direction": "forward",
+      "weight": 0.4,
+      "description": "O guia técnico acompanha o boot."
+    },
+    {
+      "source": "domain:acesso-pela-borda",
+      "target": "flow:caminho-antigo-202",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0,
+      "description": "O domínio guarda o caminho antigo ao lado do fluxo do túnel."
+    },
+    {
+      "source": "flow:caminho-antigo-202",
+      "target": "step:caminho-antigo-202:pagina",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0,
+      "description": "Único passo: a página 202 do Porteiro."
+    },
+    {
+      "source": "domain:contas-e-admin",
+      "target": "flow:giro-do-admin",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:giro-do-admin",
+      "target": "step:giro-do-admin:keeper",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0,
+      "description": "O pedido entra pelo Keeper, sem porta."
+    },
+    {
+      "source": "flow:giro-do-admin",
+      "target": "step:giro-do-admin:geracao",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0,
+      "description": "O contador sobe antes da chave nova."
+    },
+    {
+      "source": "flow:giro-do-admin",
+      "target": "step:giro-do-admin:maquina",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0,
+      "description": "maquina.key nasce no boot e fica fora dos volumes."
+    },
+    {
+      "source": "flow:giro-do-admin",
+      "target": "step:giro-do-admin:inventario",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0,
+      "description": "O inventário confirma o que existe sem ler a privada."
+    }
+  ],
+  "layers": [
+    {
+      "id": "layer:orquestracao",
+      "name": "Orquestração",
+      "description": "Scripts de preparação e o compose do ngrok. O boot cria os arquivos montados e maquina.key. A tecla Q encerra também o PID do Keeper.",
+      "nodeIds": [
+        "domain:boot-e-infra",
+        "flow:subida-da-stack",
+        "step:subida-da-stack:arquivos",
+        "step:subida-da-stack:porteiro",
+        "step:subida-da-stack:scout",
+        "step:subida-da-stack:console",
+        "step:subida-da-stack:stack-llm",
+        "step:giro-do-admin:maquina"
+      ]
+    },
+    {
+      "id": "layer:borda",
+      "name": "Borda do túnel",
+      "description": "Do ngrok até o app: IP do visitante, origem, cookie n8groker_sessao, política do portal, trilha.jsonl e a imagem do Scout.",
+      "nodeIds": [
+        "domain:acesso-pela-borda",
+        "domain:observabilidade",
+        "flow:visitante-novo",
+        "flow:abrir-app",
+        "flow:segunda-origem",
+        "flow:revogar-sessao",
+        "flow:trilha-e-alerta",
+        "step:visitante-novo:pagina-202",
+        "step:visitante-novo:origem-js",
+        "step:visitante-novo:registrar",
+        "step:visitante-novo:aprovar",
+        "step:abrir-app:login",
+        "step:abrir-app:ticket",
+        "step:abrir-app:escolher",
+        "step:abrir-app:liberado",
+        "step:segunda-origem:script",
+        "step:revogar-sessao:lista",
+        "step:revogar-sessao:revogar",
+        "step:revogar-sessao:raiz",
+        "step:trilha-e-alerta:checkpoint",
+        "step:trilha-e-alerta:ver"
+      ]
+    },
+    {
+      "id": "layer:scout-local",
+      "name": "Scout local",
+      "description": "API em 127.0.0.1:8765 para rotas, clientes, alias, bloqueio e firewall da máquina.",
+      "nodeIds": [
+        "step:subida-da-stack:api-local"
+      ]
+    },
+    {
+      "id": "layer:porteiro",
+      "name": "Porteiro",
+      "description": "Fila, identidade e aprovação. Só responde na rede local e exige token.",
+      "nodeIds": [
+        "step:abrir-app:porteiro",
+        "step:segunda-origem:pendente",
+        "step:abrir-litellm:porteiro",
+        "flow:caminho-antigo-202",
+        "step:caminho-antigo-202:pagina"
+      ]
+    },
+    {
+      "id": "layer:control-plane",
+      "name": "Control Plane",
+      "description": "Console Streamlit, contas sem senha, JWT de admin, Keeper, inventário, backup, diagnóstico, chat e a borda em 8502.",
+      "nodeIds": [
+        "domain:contas-e-admin",
+        "flow:login-admin",
+        "flow:reset-de-senha",
+        "step:login-admin:emitir",
+        "step:login-admin:console",
+        "step:login-admin:console-aceita-o-jwt",
+        "step:reset-de-senha:gravar",
+        "step:reset-de-senha:cookie-cai",
+        "step:reset-de-senha:admin-fica",
+        "flow:giro-do-admin",
+        "step:giro-do-admin:keeper",
+        "step:giro-do-admin:geracao",
+        "step:giro-do-admin:inventario"
+      ]
+    },
+    {
+      "id": "layer:n8n",
+      "name": "n8n",
+      "description": "Workflows de aprovação e de alerta, a pasta Arquivos-n8n, os .gitkeep de volume, o compose e o serviço n8n_app.",
+      "nodeIds": [
+        "step:trilha-e-alerta:webhook"
+      ]
+    },
+    {
+      "id": "layer:stack-llm",
+      "name": "Stack LLM",
+      "description": "Um compose e oito serviços na rede rede_comunicacao: Postgres, ClickHouse, Redis e MinIO do Langfuse, o worker, o web, o Postgres do LiteLLM e o proxy. Nenhum provider de modelo é pré-cadastrado no litellm_config.yaml.",
+      "nodeIds": [
+        "domain:stack-llm",
+        "flow:abrir-litellm",
+        "step:abrir-litellm:raiz"
+      ]
+    },
+    {
+      "id": "layer:testes",
+      "name": "Testes",
+      "description": "Pytest e testes Node da borda, do boot, das contas, do Keeper e do console.",
+      "nodeIds": [
+        "step:subida-da-stack:suite"
+      ]
+    },
+    {
+      "id": "layer:documentacao",
+      "name": "Documentação",
+      "description": "README, guia técnico, desenho das decisões e os READMEs dos pacotes.",
+      "nodeIds": [
+        "document:README.md",
+        "document:docs/ENTENDA-O-PROJETO.md",
+        "document:DOCUMENTACAO.md"
+      ]
+    },
+    {
+      "id": "layer:configuracao",
+      "name": "Configuração e CI",
+      "description": "Exemplos de ambiente, listas de dependência, o Dockerfile do Scout e o workflow que roda pytest e o PSScriptAnalyzer. O CI não dispara o boot.",
+      "nodeIds": [
+        "step:subida-da-stack:nodes"
+      ]
+    }
+  ],
+  "tour": [
+    {
+      "order": 1,
+      "title": "O que é o N8Groker",
+      "description": "Comece pelo README e por docs/ENTENDA-O-PROJETO.md. Há duas linhas: master, sem Control Plane, e control-plane-plus, o uso diário. O mapa desta versão inclui o Keeper, as duas trilhas e o cookie de sessão.",
+      "nodeIds": [
+        "document:README.md",
+        "document:docs/ENTENDA-O-PROJETO.md",
+        "document:DOCUMENTACAO.md"
+      ]
+    },
+    {
+      "order": 2,
+      "title": "Boot no Windows",
+      "description": "iniciar_servicos.ps1 cria os arquivos montados e maquina.key antes de qualquer compose, sobe o Scout e aponta o ngrok para scout-backend. A tecla Q encerra a stack e o PID do Keeper.",
+      "nodeIds": [
+        "flow:subida-da-stack",
+        "domain:boot-e-infra",
+        "step:giro-do-admin:maquina"
+      ],
+      "languageLesson": "No PowerShell 5.1 não há ?? nem ?. . O script do boot tem BOM UTF-8. As escritas do .env continuam sem BOM."
+    },
+    {
+      "order": 3,
+      "title": "O túnel chega no Scout",
+      "description": "O ngrok entrega o pedido ao scout-backend. O IP do visitante é o último X-Forwarded-For, e só se o peer TCP for o DNS ao vivo de ngrok_service. O gateway Docker não vira cliente.",
+      "nodeIds": [
+        "flow:visitante-novo",
+        "step:visitante-novo:pagina-202"
+      ]
+    },
+    {
+      "order": 4,
+      "title": "Origem antes da aprovação",
+      "description": "A página 202 carrega origem.js no mesmo site. O navegador gera a chave ECDSA e registra a origem. Qualquer caminho cujo último segmento é origem.js é do Scout, não do Streamlit.",
+      "nodeIds": [
+        "step:visitante-novo:origem-js",
+        "step:visitante-novo:registrar"
+      ],
+      "languageLesson": "O index.html do Streamlit começa com um comentário de copyright. Lido como JavaScript, isso vira Unexpected identifier Streamlit."
+    },
+    {
+      "order": 5,
+      "title": "Login, ticket e Abrir n8n",
+      "description": "O usuário cola o JWT. O painel assina um ticket HMAC curto. /painel/escolher confere IP, geração e a prova da origem, emite o cookie n8groker_sessao e manda o navegador para a raiz.",
+      "nodeIds": [
+        "flow:abrir-app",
+        "step:abrir-app:login",
+        "step:abrir-app:escolher"
+      ]
+    },
+    {
+      "order": 6,
+      "title": "O Porteiro é a segunda checagem",
+      "description": "Antes de ligar n8n, Langfuse ou LiteLLM, o Scout consulta a fila em 127.0.0.1:5676 com o token do painel. Aprovar, vincular e bloquear pela URL pública continuam 403.",
+      "nodeIds": [
+        "step:abrir-app:porteiro",
+        "step:segunda-origem:pendente"
+      ]
+    },
+    {
+      "order": 7,
+      "title": "Trilha, sessão e alerta",
+      "description": "trilha.jsonl guarda LIBERADO e BLOQUEIO, com a janela de 20 e o webhook GET sem token. auth.jsonl guarda os passos auth.* e não entra nesse alerta. Revogar um sid derruba só aquele cookie.",
+      "nodeIds": [
+        "flow:trilha-e-alerta",
+        "step:trilha-e-alerta:webhook"
+      ]
+    },
+    {
+      "order": 8,
+      "title": "Contas e admin",
+      "description": "O admin cola no console 8501 um JWT de cinco minutos. Não há senha. O Keeper emite o JWT de usuário. As contas ficam em users.json e a borda recusa o JWT de admin.",
+      "nodeIds": [
+        "flow:login-admin",
+        "flow:reset-de-senha"
+      ]
+    },
+    {
+      "order": 9,
+      "title": "Modelo de segurança",
+      "description": "O Keeper não escuta porta. Girar a chave de admin não tem folga: a sessão cai quando admin-geracao sobe, e a pública anterior só classifica rotacionado. maquina.key nasce no boot e não entra em volume. O inventário não lê privada. Arquivos montados continuam no mesmo inode.",
+      "nodeIds": [
+        "flow:giro-do-admin",
+        "step:giro-do-admin:keeper",
+        "step:reset-de-senha:gravar",
+        "step:subida-da-stack:nodes"
+      ],
+      "languageLesson": "Trocar o inode de um arquivo bind-mounted no Docker Desktop quebra a montagem. Por isso a gravação trunca o mesmo arquivo."
+    },
+    {
+      "order": 10,
+      "title": "Stack LLM e o teste que segura o fluxo",
+      "description": "Langfuse e LiteLLM ficam em loopback. Os arquivos dos fluxos ficam em Arquivos-n8n. O teste do fluxo diário atravessa a borda no processo, e o CI roda pytest e o analisador PowerShell sem subir a stack.",
+      "nodeIds": [
+        "flow:abrir-litellm",
+        "step:subida-da-stack:suite"
+      ]
+    }
+  ]
+}

@@ -2,10 +2,8 @@
 $ErrorActionPreference = "Continue"
 $Root = $PSScriptRoot
 $PathEnv = Join-Path $Root ".env"
+$PathEnvExample = Join-Path $Root ".env.example"
 $PathEnvTemplate = Join-Path $Root ".env_template"
-$PathScout = Join-Path $Root "Scout_OSINT_Docker"
-$ReqScout = Join-Path $PathScout "requirements.txt"
-
 $script:Results = @{}
 
 function Get-EnvValue {
@@ -23,66 +21,29 @@ function Get-EnvValue {
     return $Default
 }
 
-function Test-ScoutEnabled {
-    $flag = Get-EnvValue "USE_SCOUT" "1"
-    if (-not (Test-Path $PathEnv)) {
-        if (Test-Path $PathEnvTemplate) {
-            foreach ($line in Get-Content $PathEnvTemplate -Encoding UTF8) {
-                if ($line -match "^\s*USE_SCOUT\s*=\s*(.*)$") {
-                    $flag = $Matches[1].Trim()
-                    break
-                }
-            }
-        }
-    }
-    return ($flag -match "^(1|true|yes|sim|on)$")
-}
-
-function Find-ScoutPython {
-    $venv = Join-Path $PathScout ".venv\Scripts\python.exe"
-    if (Test-Path $venv) { return @{ Exe = $venv; UsePyLauncher = $false } }
-    if (Get-Command py -ErrorAction SilentlyContinue) { return @{ Exe = "py"; UsePyLauncher = $true } }
-    if (Get-Command python -ErrorAction SilentlyContinue) { return @{ Exe = "python"; UsePyLauncher = $false } }
-    return $null
-}
-
-function Invoke-AutoScoutPython {
-    $info = Find-ScoutPython
-    if (-not $info) {
-        Write-Host "    Python nao encontrado. Instale Python 3.10+ e escolha Reverificar." -ForegroundColor Yellow
-        return
-    }
-    $venvPy = Join-Path $PathScout ".venv\Scripts\python.exe"
-    if (-not (Test-Path $venvPy)) {
-        Write-Host "    A criar .venv em Scout_OSINT_Docker..." -ForegroundColor Gray
-        if ($info.UsePyLauncher) { & py -3 -m venv (Join-Path $PathScout ".venv") }
-        else { & $info.Exe -m venv (Join-Path $PathScout ".venv") }
-    }
-    $py = Join-Path $PathScout ".venv\Scripts\python.exe"
-    if (-not (Test-Path $py)) {
-        Write-Host "    Falha ao criar venv." -ForegroundColor Red
-        return
-    }
-    & $py -c "import requests, websocket" 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "    A instalar requirements.txt..." -ForegroundColor Gray
-        & $py -m pip install --no-cache-dir -r $ReqScout
-    }
-    Write-Host "    Scout Python OK." -ForegroundColor Green
+function Test-SecretReady {
+    param([string]$Value)
+    if (-not $Value) { return $false }
+    if ($Value -like "__GENERATE_*") { return $false }
+    $bad = @(
+        "sua_chave_secreta_aqui",
+        "your_secret_key",
+        "seu_token_porteiro_aqui",
+        "your_porteiro_token"
+    )
+    return -not ($bad -contains $Value)
 }
 
 function Test-EnvKeysFilled {
-    if (-not (Test-Path $PathEnv)) { return $false }
+    if (-not (Test-Path $PathEnv)) { return @{ Ok = $false; Detail = ".env ausente" } }
+    $pending = @()
     $ngrok = Get-EnvValue "NGROK_AUTHTOKEN" ""
-    $n8nKey = Get-EnvValue "N8N_ENCRYPTION_KEY" ""
-    $porteiroToken = Get-EnvValue "PORTEIRO_TOKEN" ""
-    $badNgrok = @("", "seu_token_do_ngrok_aqui", "your_ngrok_token")
-    $badN8n = @("", "sua_chave_secreta_aqui", "your_secret_key")
-    $badPorteiro = @("", "seu_token_porteiro_aqui", "your_porteiro_token")
-    if ($badNgrok -contains $ngrok) { return $false }
-    if ($badN8n -contains $n8nKey) { return $false }
-    if ($badPorteiro -contains $porteiroToken) { return $false }
-    return $true
+    if (@("", "seu_token_do_ngrok_aqui", "your_ngrok_token") -contains $ngrok) { $pending += "NGROK_AUTHTOKEN" }
+    foreach ($key in @("N8N_ENCRYPTION_KEY", "LITELLM_MASTER_KEY", "LANGFUSE_PUBLIC_KEY", "ENCRYPTION_KEY")) {
+        if (-not (Test-SecretReady (Get-EnvValue $key ""))) { $pending += $key }
+    }
+    if ($pending.Count -eq 0) { return @{ Ok = $true; Detail = "OK" } }
+    return @{ Ok = $false; Detail = ("Pendente: " + ($pending -join ", ")) }
 }
 
 function Test-DockerRunning {
@@ -115,14 +76,6 @@ function Test-NodeOk {
     return $true
 }
 
-function Test-ScoutPythonOk {
-    if (-not (Test-ScoutEnabled)) { return $true }
-    $py = Join-Path $PathScout ".venv\Scripts\python.exe"
-    if (-not (Test-Path $py)) { return $false }
-    & $py -c "import requests, websocket" 2>$null
-    return ($LASTEXITCODE -eq 0)
-}
-
 function Test-DataDirsOk {
     $a = Join-Path $Root "n8n\n8n\data"
     $b = Join-Path $Root "n8n\storage\Porteiro"
@@ -130,7 +83,7 @@ function Test-DataDirsOk {
 }
 
 function Test-PortsFree {
-    $ports = @(5677, 5678, 4040, 4050, 8765)
+    $ports = @(5677, 5678, 4040, 4050, 8765, 3000, 3030, 4000, 9090)
     $busy = @()
     foreach ($p in $ports) {
         try {
@@ -155,6 +108,75 @@ function Test-WslOk {
 function Test-ExecutionPolicyOk {
     $pol = Get-ExecutionPolicy -Scope CurrentUser
     return ($pol -in @("RemoteSigned", "Unrestricted", "Bypass"))
+}
+
+function Find-HostPython {
+    $candidates = @()
+    if (Get-Command py -ErrorAction SilentlyContinue) {
+        $candidates += @{ Exe = "py"; Prefix = @("-3") }
+    }
+    if (Get-Command python -ErrorAction SilentlyContinue) {
+        $candidates += @{ Exe = "python"; Prefix = @() }
+    }
+    foreach ($c in $candidates) {
+        $argList = @()
+        $argList += $c.Prefix
+        $argList += @("-c", "import sys; print('%d.%d' % (sys.version_info[0], sys.version_info[1]))")
+        $raw = & $c.Exe @argList 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $raw) { continue }
+        $parts = "$raw".Trim().Split(".")
+        if ($parts.Count -lt 2) { continue }
+        $major = [int]$parts[0]
+        $minor = [int]$parts[1]
+        if ($major -gt 3 -or ($major -eq 3 -and $minor -ge 10)) {
+            return @{ Exe = $c.Exe; Prefix = $c.Prefix; Version = "$raw".Trim() }
+        }
+    }
+    return $null
+}
+
+function Refresh-SessionPath {
+    $machine = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
+    $user = [System.Environment]::GetEnvironmentVariable("Path", "User")
+    $env:Path = "$machine;$user"
+}
+
+function Confirm-Install {
+    param([string]$Prompt)
+    $answer = Read-Host "    $Prompt (S/N)"
+    return ($answer -match "^(S|s|Y|y)$")
+}
+
+function Invoke-InitEnv {
+    $py = Find-HostPython
+    if (-not $py) {
+        Write-Host "    Python 3.10+ necessario para gerar o .env." -ForegroundColor Yellow
+        return
+    }
+    $argList = @()
+    $argList += $py.Prefix
+    $argList += (Join-Path $Root "scripts\init_env.py")
+    & $py.Exe @argList
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "    init_env.py falhou." -ForegroundColor Red
+    }
+}
+
+function Install-WithWinget {
+    param(
+        [string]$Id,
+        [string]$Label
+    )
+    if (-not (Confirm-Install "Instalar $Label com winget?")) {
+        Write-Host "    Instalacao cancelada." -ForegroundColor Yellow
+        return
+    }
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Write-Host "    winget nao encontrado. Use o link de documentacao deste item." -ForegroundColor Yellow
+        return
+    }
+    winget install -e --id $Id --accept-package-agreements --accept-source-agreements
+    Refresh-SessionPath
 }
 
 function Ensure-ArquivosN8n {
@@ -195,8 +217,7 @@ function Ensure-DataDirs {
         if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
         $keep = Join-Path $d ".gitkeep"
         if (-not (Test-Path -LiteralPath $keep)) {
-            $empty = New-Object byte[] 0
-            [System.IO.File]::WriteAllBytes($keep, $empty)
+            [System.IO.File]::WriteAllBytes($keep, [byte[]]@())
         }
     }
     Write-Host "    Pastas de dados criadas." -ForegroundColor Green
@@ -242,11 +263,6 @@ function Invoke-DependencyLoop {
         } else {
             $ok = [bool]$testResult
             $detail = if ($ok) { "OK" } else { "Pendente" }
-        }
-
-        if ($Item.Id -eq "scout_python" -and -not (Test-ScoutEnabled)) {
-            $script:Results[$Item.Id] = @{ Status = "OK"; Detail = "USE_SCOUT=0 (nao necessario)" }
-            return
         }
 
         if ($ok) {
@@ -301,31 +317,37 @@ $checklist = @(
         }
     },
     @{
+        Id     = "python_host"
+        Name   = "Python 3.10+ (Control Plane e geracao do .env)"
+        Url    = "https://www.python.org/downloads/"
+        CanAuto = $true
+        Test   = {
+            $py = Find-HostPython
+            if ($py) { return @{ Ok = $true; Detail = $py.Version } }
+            return @{ Ok = $false; Detail = "Python 3.10+ ausente" }
+        }
+        Auto   = { Install-WithWinget -Id "Python.Python.3.12" -Label "Python 3.12" }
+    },
+    @{
         Id     = "env_file"
-        Name   = "Ficheiro .env"
+        Name   = "Arquivo .env (segredos gerados, sem valor real no Git)"
         Url    = $null
         CanAuto = $true
         Test   = { Test-Path $PathEnv }
-        Auto   = {
-            if (Test-Path $PathEnvTemplate) {
-                Copy-Item -LiteralPath $PathEnvTemplate -Destination $PathEnv -Force
-                Write-Host "    .env criado a partir de .env_template" -ForegroundColor Green
-            } else {
-                Write-Host "    .env_template nao encontrado." -ForegroundColor Red
-            }
-        }
+        Auto   = { Invoke-InitEnv }
     },
     @{
         Id     = "env_keys"
-        Name   = "Chaves .env (NGROK + N8N + PORTEIRO_TOKEN)"
+        Name   = "Chaves .env (ngrok manual + segredos gerados)"
         Url    = "https://dashboard.ngrok.com/get-started/your-authtoken"
         CanAuto = $true
         Test   = { Test-EnvKeysFilled }
         Auto   = {
+            Invoke-InitEnv
             if (Test-Path $PathEnv) {
                 # PS 5.1 reparte ArgumentList nos espaços; aspas mantêm o caminho inteiro.
                 Start-Process notepad.exe -ArgumentList "`"$PathEnv`""
-                Write-Host "    .env aberto no Notepad. Preencha NGROK_AUTHTOKEN, N8N_ENCRYPTION_KEY e PORTEIRO_TOKEN." -ForegroundColor Gray
+                Write-Host "    .env aberto. Preencha so o NGROK_AUTHTOKEN se ele ainda for placeholder." -ForegroundColor Gray
             } else {
                 Write-Host "    Crie .env primeiro (item anterior)." -ForegroundColor Yellow
             }
@@ -335,9 +357,9 @@ $checklist = @(
         Id     = "docker_install"
         Name   = "Docker instalado"
         Url    = "https://www.docker.com/products/docker-desktop/"
-        CanAuto = $false
+        CanAuto = $true
         Test   = { [bool](Get-Command docker -ErrorAction SilentlyContinue) }
-        Auto   = { }
+        Auto   = { Install-WithWinget -Id "Docker.DockerDesktop" -Label "Docker Desktop" }
     },
     @{
         Id     = "docker_running"
@@ -386,14 +408,6 @@ $checklist = @(
         Auto   = { }
     },
     @{
-        Id     = "scout_python"
-        Name   = "Python + deps Scout (USE_SCOUT=1)"
-        Url    = "https://www.python.org/downloads/"
-        CanAuto = $true
-        Test   = { Test-ScoutPythonOk }
-        Auto   = { Invoke-AutoScoutPython }
-    },
-    @{
         Id     = "data_dirs"
         Name   = "Pastas de dados (n8n + Porteiro)"
         Url    = $null
@@ -403,7 +417,7 @@ $checklist = @(
     },
     @{
         Id     = "ports"
-        Name   = "Portas livres (5677,5678,4040,4050,8765)"
+        Name   = "Portas livres (5677,5678,4040,4050,8765,3000,3030,4000,9090)"
         Url    = $null
         CanAuto = $false
         Test   = {
@@ -413,6 +427,72 @@ $checklist = @(
         }
         Auto   = {
             Write-Host "    Feche o processo que usa a porta ou altere portas no .env." -ForegroundColor Gray
+        }
+    },
+    @{
+        Id     = "control_plane"
+        Name   = "Dependencias Python do Control Plane"
+        Url    = $null
+        CanAuto = $true
+        Test   = {
+            $py = Join-Path $Root "control_plane\.venv\Scripts\python.exe"
+            if (-not (Test-Path $py)) { return @{ Ok = $false; Detail = "venv ausente" } }
+            & $py -c "import streamlit" 2>$null
+            if ($LASTEXITCODE -eq 0) { return @{ Ok = $true; Detail = "streamlit OK" } }
+            return @{ Ok = $false; Detail = "streamlit ausente no venv" }
+        }
+        Auto   = {
+            $hostPy = Find-HostPython
+            if (-not $hostPy) {
+                Write-Host "    Instale Python 3.10+ antes." -ForegroundColor Yellow
+                return
+            }
+            $venv = Join-Path $Root "control_plane\.venv"
+            $argList = @()
+            $argList += $hostPy.Prefix
+            $argList += @("-m", "venv", $venv)
+            & $hostPy.Exe @argList
+            $venvPy = Join-Path $venv "Scripts\python.exe"
+            if (-not (Test-Path $venvPy)) {
+                Write-Host "    Falha ao criar o venv do Control Plane." -ForegroundColor Red
+                return
+            }
+            & $venvPy -m pip install --no-cache-dir -r (Join-Path $Root "control_plane\requirements.txt")
+        }
+    },
+    @{
+        Id     = "llm_images"
+        Name   = "Imagens Docker do Langfuse e do LiteLLM"
+        Url    = $null
+        CanAuto = $true
+        Test   = {
+            if (-not (Test-DockerRunning)) { return @{ Ok = $false; Detail = "Docker offline" } }
+            $images = @(
+                "langfuse/langfuse:4.30.0",
+                "langfuse/langfuse-worker:4.30.0",
+                "ghcr.io/berriai/litellm:v1.103.1"
+            )
+            foreach ($img in $images) {
+                docker image inspect $img 2>$null | Out-Null
+                if ($LASTEXITCODE -ne 0) { return @{ Ok = $false; Detail = "falta $img" } }
+            }
+            return @{ Ok = $true; Detail = "imagens presentes" }
+        }
+        Auto   = {
+            if (-not (Test-Path $PathEnv)) {
+                Write-Host "    Crie o .env antes do pull (os compose exigem as variaveis)." -ForegroundColor Yellow
+                return
+            }
+            if (-not (Confirm-Install "Baixar as imagens do Langfuse e do LiteLLM?")) {
+                Write-Host "    Pull cancelado." -ForegroundColor Yellow
+                return
+            }
+            $compose = Join-Path $Root "llm\docker-compose.yml"
+            if (Get-Command docker-compose -ErrorAction SilentlyContinue) {
+                & docker-compose -f $compose --env-file $PathEnv pull
+            } else {
+                & docker compose -f $compose --env-file $PathEnv pull
+            }
         }
     }
 )
@@ -437,7 +517,7 @@ Write-Host "=================================================" -ForegroundColor 
 Write-Host " RESUMO" -ForegroundColor Cyan
 Write-Host "=================================================" -ForegroundColor Cyan
 
-$criticalIds = @("env_file", "env_keys", "docker_install", "docker_running", "docker_network", "nodejs")
+$criticalIds = @("python_host", "env_file", "env_keys", "docker_install", "docker_running", "docker_network", "nodejs")
 $hasCriticalFail = $false
 
 foreach ($item in $checklist) {

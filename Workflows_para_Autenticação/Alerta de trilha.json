@@ -1,0 +1,130 @@
+{
+  "name": "Alerta de trilha",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Alerta de trilha\n\nWebhook GET `/webhook/alerta-trilha`.\nCampos na query: regra, ip, conta, sid, origem, app, detalhe, hora.\nSem corpo e sem token.\n\nO no de email fica desligado. E um exemplo: ligue so depois de configurar o SMTP.\n\nImporte este arquivo no n8n em http://127.0.0.1:5678 e ative o fluxo.\nUm workflow ja importado nao muda sozinho quando o JSON do repositorio muda.\nDo container do Scout o mesmo caminho e http://n8n_app:5678/webhook/alerta-trilha.",
+        "height": 280,
+        "width": 460
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-480, -300],
+      "id": "d4e5f6a7-1111-4aaa-8bbb-111122223333",
+      "name": "Como usar"
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "alerta-trilha",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-480, 0],
+      "id": "e5f6a7b8-2222-4bbb-8ccc-222233334444",
+      "name": "Webhook alerta-trilha",
+      "webhookId": "alerta-trilha-n8groker"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "alerta-regra",
+              "name": "regra",
+              "value": "={{ $json.query.regra }}",
+              "type": "string"
+            },
+            {
+              "id": "alerta-ip",
+              "name": "ip",
+              "value": "={{ $json.query.ip }}",
+              "type": "string"
+            },
+            {
+              "id": "alerta-conta",
+              "name": "conta",
+              "value": "={{ $json.query.conta }}",
+              "type": "string"
+            },
+            {
+              "id": "alerta-sid",
+              "name": "sid",
+              "value": "={{ $json.query.sid }}",
+              "type": "string"
+            },
+            {
+              "id": "alerta-origem",
+              "name": "origem",
+              "value": "={{ $json.query.origem }}",
+              "type": "string"
+            },
+            {
+              "id": "alerta-app",
+              "name": "app",
+              "value": "={{ $json.query.app }}",
+              "type": "string"
+            },
+            {
+              "id": "alerta-detalhe",
+              "name": "detalhe",
+              "value": "={{ $json.query.detalhe }}",
+              "type": "string"
+            },
+            {
+              "id": "alerta-hora",
+              "name": "hora",
+              "value": "={{ $json.query.hora }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-220, 0],
+      "id": "f6a7b8c9-3333-4ccc-8ddd-333344445555",
+      "name": "Registrar alerta"
+    },
+    {
+      "parameters": {
+        "fromEmail": "alerta@localhost",
+        "toEmail": "voce@exemplo.com",
+        "subject": "=Alerta de trilha {{ $json.regra }}",
+        "text": "=regra={{ $json.regra }}\nip={{ $json.ip }}\nconta={{ $json.conta }}\nsid={{ $json.sid }}\norigem={{ $json.origem }}\napp={{ $json.app }}\ndetalhe={{ $json.detalhe }}\nhora={{ $json.hora }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [40, 180],
+      "id": "a7b8c9d0-4444-4ddd-8eee-444455556666",
+      "name": "Email de exemplo",
+      "disabled": true
+    }
+  ],
+  "connections": {
+    "Webhook alerta-trilha": {
+      "main": [
+        [
+          {
+            "node": "Registrar alerta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

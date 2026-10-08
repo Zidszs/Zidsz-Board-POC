@@ -1,10 +1,13 @@
 services:
   n8n_app:
-    image: docker.n8n.io/n8nio/n8n:latest
+    image: docker.n8n.io/n8nio/n8n:2.42.5
     container_name: n8n_app
     restart: unless-stopped
+    # Só o token do workflow. Não é o .env da raiz: o Scout monta aquele arquivo.
+    env_file:
+      - ../.n8groker/porteiro-n8n.env
     ports:
-      - "5678:5678"
+      - "127.0.0.1:5678:5678"
     extra_hosts:                                    
       - "host.docker.internal:host-gateway"         
     environment:
@@ -13,13 +16,25 @@ services:
       - N8N_SECURE_COOKIE=false
       - WEBHOOK_URL=${NGROK_REMOTE_URL} 
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
-      # false: o nó Write pode gravar. O allowlist abaixo é que limita o disco.
+      # Credencial OpenAI (tipo openAiApi) usa o LiteLLM em http://litellm:4000/v1.
+      # Vazio quando o .env ainda não tem N8N_CREDENTIALS_OVERWRITE_DATA — aspas simples
+      # para o JSON gerado não quebrar o YAML. Sem provider de modelo aqui.
+      - 'CREDENTIALS_OVERWRITE_DATA=${N8N_CREDENTIALS_OVERWRITE_DATA-}'
       - N8N_BLOCK_FS_WRITE_ACCESS=false
       - N8N_BLOCK_FILE_ACCESS_TO_WORKSPACE=false
-      # Imagem n8n:latest (2.0+): sem isto o padrão é ~/.n8n-files.
+      # Imagem n8n 2.42.5 (2.0+): sem isto o padrão é ~/.n8n-files.
       # Só a pasta de arquivos do usuário. Não abrir / nem ~/.n8n.
+      # NODES_EXCLUDE abaixo continua tirando os nodes de arquivo até
+      # o nome sair da lista. A allowlist vale quando o node volta.
       - N8N_RESTRICT_FILE_ACCESS_TO=/home/node/Arquivos-n8n
       - N8N_BLOCK_FILE_ACCESS_TO_N8N_FILES=true
+      # A imagem lê NODES_EXCLUDE (JSON), não N8N_NODES_EXCLUDE. O .env guarda a
+      # lista separada por vírgula em N8N_NODES_EXCLUDE; o iniciar_servicos.ps1
+      # converte e exporta NODES_EXCLUDE antes deste compose. Vale para o túnel
+      # e para localhost:5678. Code fica de fora: o fluxo do dia a dia roda
+      # JavaScript no n8n, não um shell. N8N_BLOCK_ENV_ACCESS_IN_NODE não entra:
+      # o workflow de aprovação lê $env.PORTEIRO_N8N_TOKEN.
+      - 'NODES_EXCLUDE=${NODES_EXCLUDE:-["n8n-nodes-base.executeCommand","n8n-nodes-base.ssh","n8n-nodes-base.readWriteFile","n8n-nodes-base.localFileTrigger","n8n-nodes-base.readBinaryFile","n8n-nodes-base.readBinaryFiles","n8n-nodes-base.writeBinaryFile"]}'
     volumes:
       # Banco e credenciais. Não mudar este destino (n8n/n8n/data no host).
       - ./n8n/data:/home/node/.n8n

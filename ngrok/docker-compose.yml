@@ -1,15 +1,18 @@
 services:
   ngrok_service:
-    image: ngrok/ngrok:latest
+    image: ngrok/ngrok:3.39.8-debian
     container_name: ngrok_service
     restart: unless-stopped
     environment:
       - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
     command:
+      # Com Scout, o script aponta para scout-backend:4050 na rede Docker.
+      # Sem Scout, o padrão continua o Porteiro no host.
       - "http"
-      - "host.docker.internal:${NGROK_TUNNEL_TARGET:-5677}"
+      - "${NGROK_TUNNEL_HOST:-host.docker.internal}:${NGROK_TUNNEL_TARGET:-5677}"
     ports:
-      - "4040:4040"
+      # Só na máquina. O HUD lê localhost:4040. O túnel segue em host.docker.internal.
+      - "127.0.0.1:4040:4040"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:

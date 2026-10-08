@@ -67,6 +67,22 @@ function Remove-ItemSafe {
     }
 }
 
+function Remove-LogsVolateis {
+    # Arquivos-n8n e do usuario. A varredura de *.log nao entra nela.
+    $pasta = [System.IO.Path]::GetFullPath((Join-Path $Root "Arquivos-n8n"))
+    $sep = [System.IO.Path]::DirectorySeparatorChar
+    $prefixo = $pasta.TrimEnd('\', '/') + $sep
+    Get-ChildItem -Path $Root -Recurse -File -Filter "*.log" -ErrorAction SilentlyContinue |
+        ForEach-Object {
+            $full = [System.IO.Path]::GetFullPath($_.FullName)
+            if ($full.StartsWith($prefixo, [System.StringComparison]::OrdinalIgnoreCase)) {
+                return
+            }
+            Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+            Write-Host ('     log: ' + $_.FullName) -ForegroundColor DarkGray
+        }
+}
+
 function Ensure-GitKeep {
     param([Parameter(Mandatory = $true)][string]$Dir)
     if (-not (Test-Path $Dir)) {
@@ -75,36 +91,9 @@ function Ensure-GitKeep {
     $keep = Join-Path $Dir ".gitkeep"
     # 0 bytes, igual ao ficheiro versionado. Set-Content -Encoding UTF8 no
     # Windows PowerShell 5.1 grava BOM e CRLF, e o git status fica sujo.
-    $empty = New-Object byte[] 0
-    [System.IO.File]::WriteAllBytes($keep, $empty)
+    [System.IO.File]::WriteAllBytes($keep, [byte[]]@())
     Write-Ok "Scaffold: $Dir"
 }
-
-function Test-IsInsideDirectory {
-    param(
-        [Parameter(Mandatory = $true)][string]$Directory,
-        [Parameter(Mandatory = $true)][string]$Path
-    )
-    $sep = [string][System.IO.Path]::DirectorySeparatorChar
-    $base = [System.IO.Path]::GetFullPath($Directory)
-    $full = [System.IO.Path]::GetFullPath($Path)
-    if (-not $base.EndsWith($sep)) { $base = $base + $sep }
-    return $full.StartsWith($base, [System.StringComparison]::OrdinalIgnoreCase)
-}
-
-function Remove-ProjectLogs {
-    param([Parameter(Mandatory = $true)][string]$Root)
-    $arquivos = Join-Path $Root "Arquivos-n8n"
-    Get-ChildItem -LiteralPath $Root -Recurse -File -Filter "*.log" -ErrorAction SilentlyContinue |
-        ForEach-Object {
-            if (Test-IsInsideDirectory -Directory $arquivos -Path $_.FullName) { return }
-            Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
-            Write-Host ('     log: ' + $_.FullName) -ForegroundColor DarkGray
-        }
-}
-
-# Dot-source (testes) define as funcoes e nao executa o reset.
-if ($MyInvocation.InvocationName -ne '.') {
 
 Write-Host ""
 Write-Host "=================================================" -ForegroundColor Cyan
@@ -140,6 +129,25 @@ foreach ($cf in $composeFiles) {
     Invoke-ComposeDown -ComposeFile $cf -EnvFile $envFile
 }
 
+Write-Step "Parando Langfuse/LiteLLM e removendo os volumes nomeados dessa stack..."
+$llmCompose = Join-Path $Root "llm\docker-compose.yml"
+if (Test-Path $llmCompose) {
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "SilentlyContinue"
+    try {
+        if (Test-Path $envFile) {
+            & docker-compose -f $llmCompose --env-file $envFile down -v 2>$null | Out-Null
+        } else {
+            & docker-compose -f $llmCompose down -v 2>$null | Out-Null
+        }
+        Write-Ok "volumes Langfuse/LiteLLM removidos (down -v)"
+    } catch {
+        Write-Skip "down -v do llm falhou (Docker offline?)"
+    } finally {
+        $ErrorActionPreference = $prevEap
+    }
+}
+
 Write-Step "Apagando dados volatil..."
 
 Remove-ItemSafe (Join-Path $Root ".env")
@@ -155,7 +163,7 @@ Remove-ItemSafe (Join-Path $Root "Scout_OSINT_Docker\.venv")
 Write-Step "Apagando __pycache__ e *.log..."
 Get-ChildItem -Path $Root -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue |
     ForEach-Object { Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
-Remove-ProjectLogs -Root $Root
+Remove-LogsVolateis
 
 Write-Step "Recriando pastas vazias..."
 Ensure-GitKeep (Join-Path $Root "n8n\n8n\data")
@@ -163,13 +171,23 @@ Ensure-GitKeep (Join-Path $Root "n8n\storage\Porteiro")
 Write-Host "[--] Arquivos-n8n preservada (arquivos do usuario; o reset nao apaga)." -ForegroundColor DarkGray
 
 if ($CreateEnvFromTemplate) {
-    $template = Join-Path $Root ".env_template"
-    $dest = Join-Path $Root ".env"
-    if (Test-Path $template) {
-        Copy-Item -LiteralPath $template -Destination $dest -Force
-        Write-Ok ".env criado a partir de .env_template"
+    $example = Join-Path $Root ".env.example"
+    $scriptPy = Join-Path $Root "scripts\init_env.py"
+    $py = $null
+    if (Get-Command py -ErrorAction SilentlyContinue) { $py = "py" }
+    elseif (Get-Command python -ErrorAction SilentlyContinue) { $py = "python" }
+    if ($py -and (Test-Path $scriptPy)) {
+        if ($py -eq "py") { & py -3 $scriptPy } else { & python $scriptPy }
+        if ($LASTEXITCODE -eq 0) {
+            Write-Ok ".env recriado com segredos aleatorios (init_env.py)"
+        } else {
+            Write-Host "[AVISO] init_env.py falhou." -ForegroundColor Yellow
+        }
+    } elseif (Test-Path $example) {
+        Copy-Item -LiteralPath $example -Destination (Join-Path $Root ".env") -Force
+        Write-Host "[AVISO] Python ausente: .env copiado com marcadores. Rode python scripts/init_env.py." -ForegroundColor Yellow
     } else {
-        Write-Host '[AVISO] .env_template nao encontrado.' -ForegroundColor Yellow
+        Write-Host '[AVISO] .env.example nao encontrado.' -ForegroundColor Yellow
     }
 }
 
@@ -181,13 +199,12 @@ Write-Host ""
 Write-Host 'Estado: projeto pronto para primeira execucao (estilo GitHub).'
 Write-Host ""
 if (-not $CreateEnvFromTemplate) {
-    Write-Host 'Proximo passo: copie .env_template para .env e preencha tokens.'
+    Write-Host 'Proximo passo: rode o Setup ou python scripts/init_env.py e preencha o NGROK_AUTHTOKEN.'
 } else {
-    Write-Host 'Proximo passo: edite .env (NGROK_AUTHTOKEN, N8N_ENCRYPTION_KEY, etc.).'
+    Write-Host 'Proximo passo: preencha NGROK_AUTHTOKEN no .env. Os outros segredos ja foram gerados.'
 }
 Write-Host ""
 Write-Host '  1. docker network create rede_comunicacao   (se ainda nao existir)'
 Write-Host '  2. .\iniciar_servicos.ps1'
 Write-Host '  3. Importar Aprovacao de Acesso (Novo).json no n8n'
 Write-Host ""
-}

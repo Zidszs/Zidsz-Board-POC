@@ -5,14 +5,9 @@
 *.pem
 id_rsa*
 *.db
-.n8groker/
 **/trilha/*.jsonl
 auth.jsonl
 audit.jsonl
-.venv/
-venv/
-__pycache__/
-*.pyc
 n8n/n8n/data/*
 !n8n/n8n/data/.gitkeep
 # Restos de runtime: n8n/data não é o volume; n8n/n8n/storage era o caminho dobrado.
@@ -31,8 +26,37 @@ Scout_OSINT_Docker/.venv/
 Scout_OSINT_Docker/data/
 Scout_OSINT_Docker/.env
 .porteiro.pid
+# Login, diagnóstico, backup e cache de versão do Control Plane.
+.n8groker/
 .n8groker.supervisor.lock
 .n8groker.shutdown.request
+.n8groker.skip-control-plane-venv
+.n8groker.control-plane.pid
+.n8groker.control-plane-borda.pid
+.venv/
+venv/
+control_plane.local.json
+control_plane/.venv/
+control_plane/.porteiro.cp.pid
+__pycache__/
+*.pyc
+.psscriptanalyzer-cache/
+
+# Understand-Anything: rascunho local. O grafo commitado fica em .ua/
+.ua/intermediate/
+.ua/diff-overlay.json
 Arquivos-n8n/*
 !Arquivos-n8n/.gitkeep
 !Arquivos-n8n/README.md
+
+# Segredos e trilhas locais. .env.example continua versionado.
+.env.*
+!.env.example
+*.key
+*.pem
+id_rsa*
+*.db
+**/trilha/*.jsonl
+auth.jsonl
+audit.jsonl
+
