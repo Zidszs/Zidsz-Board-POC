@@ -397,7 +397,7 @@ Após importar `Aprovacao de Acesso (Novo).json`:
 | 2 | Node **Configuracoes** | `admin_email` → e-mail real do aprovador |
 | 3 | Node **Configuracoes** | `admin_token` → `{{ $env.PORTEIRO_N8N_TOKEN }}` (já vem no JSON). Se `$env` for recusado, cole `.n8groker/porteiro-n8n.token` |
 | 4 | Node **Configuracoes** | `porteiro_url` → `http://host.docker.internal:5677` (já vem no JSON) |
-| 5 | Node **Email e Espera Aprovacao** | Credencial **SMTP** (obrigatório para enviar e-mail) |
+| 5 | Node **Email e Espera Aprovacao** | Credencial **SMTP** só se for usar o node de e-mail. Sem esse node, o SMTP não entra. Ver a seção 7.1 |
 | 6 | Barra do workflow | **Activar** — o ficheiro importado traz `"active": false` |
 
 **Tokens de aprovação e `admin_token`:**
@@ -412,6 +412,130 @@ Após importar `Aprovacao de Acesso (Novo).json`:
 `/n8n/aprovar`, `/n8n/bloquear`, `/n8n/vincular`, `/n8n/fila` e `/n8n/solicitar` não atendem pelo domínio do ngrok. Da máquina, o prefixo é `http://127.0.0.1:5676`. Do container n8n, `http://host.docker.internal:5677`, sem header de proxy. A aba Admin do console fala só com a porta 5676, atualiza a lista na hora e segue mesmo se o webhook do n8n responder 404. Aprovar um par IP e origem não grava `conta_vinculada`. Sem `origem` o dispositivo não fica aprovado. Vincular exige esse par já `aprovado` e não é feito por `/n8n/aprovar`. O webhook manda impressão, origem, navegador, sistema, idioma e horário; `pais` vai vazio. Um workflow já importado não recebe esses campos sozinho.
 
 A conta criada em `http://127.0.0.1:5678` é a conta do produto n8n. O admin do painel não tem usuário nem senha: é o JWT de `python -m control_plane.admin_token`, colado no console em `http://localhost:8501`.
+
+<a id="integrar-porteiro-automacao"></a>
+
+## 7.1 Integrar o Porteiro com outra automação
+
+O Porteiro não precisa de SMTP nem do n8n para decidir. Ele faz duas coisas:
+
+1. **Avisa** que um visitante entrou na fila, com um `GET` local, sem corpo e sem token.
+2. **Recebe o veredito** (`aprovar`, `bloquear`, `vincular`) por HTTP, com `X-Admin-Token`, só pela rede da máquina.
+
+O e-mail do workflow `Aprovacao de Acesso (Novo).json` é um jeito de pôr uma pessoa no meio. Dá para trocar esse passo por Slack, Telegram, outro fluxo, outra ferramenta ou um script. O SMTP só é necessário se o fluxo usar o node de e-mail. O passo a passo em linguagem simples, com diagramas, está em [Integrar o aviso do Porteiro](docs/apresentacao/GUIA-DE-USO.md#integrar-aviso-porteiro).
+
+### O destino do aviso é fixo
+
+O aviso sai de `acionarN8n`, em `Porteiro/porteiro.js`. O host é `127.0.0.1`. O caminho é `/webhook/solicitar-verificacao-acesso`, montado por `caminhoWebhook` em `Porteiro/identidade.js`. Os dois estão fixos no código. Isso é intencional e não será mudado.
+
+A única parte que muda é a porta, pela variável de ambiente da sessão `N8N_LOCAL_PORT`. Sem ela, a porta é `5678`. O `iniciar_servicos.ps1` não lê essa variável do `.env`: `Get-EnvValue` não a consulta, e ela não está no `.env.example`. O script sobe `node porteiro.js`, e esse processo herda o ambiente da sessão. Defina a variável na mesma janela, antes de rodar o script:
+
+```powershell
+$env:N8N_LOCAL_PORT = "5680"
+.\iniciar_servicos.ps1
+```
+
+`5680` aqui é só um exemplo de porta livre. Defina a variável de novo se abrir outra janela: um Porteiro que já subiu não passa a ver o valor novo.
+
+### O webhook local pode ser outra aplicação
+
+Qualquer serviço em `127.0.0.1` que atenda esse `GET` recebe o aviso. Não precisa ser o n8n. O Porteiro roda na máquina, com `node porteiro.js`, e o aviso sai do loopback dela. Um programa que só existe dentro do Docker recebe o aviso se a porta estiver publicada em `127.0.0.1`. O Porteiro avisa um destino só: um `GET`, um host, uma porta, um caminho.
+
+Se a outra aplicação usar outra porta, defina `N8N_LOCAL_PORT` como acima. Não ocupe a `5678` enquanto o n8n estiver no ar. O compose publica o n8n em `127.0.0.1:5678`, e dois programas não escutam a mesma porta. O proxy do visitante, `fazerProxy` em `Porteiro/porteiro.js`, continua na `5678` mesmo quando `N8N_LOCAL_PORT` muda. A variável só muda o destino do aviso.
+
+O Porteiro espera no máximo 5 segundos (`setTimeout` em `acionarN8n`) e não segura o visitante: o aviso sai em seguida, com `setImmediate`. O status da resposta vai para o log. Se o destino responder 404 ou estiver fora do ar, a fila continua e o veredito pode vir da aba Admin. Responda rápido, por exemplo `200`, e decida depois. Não deixe a conexão aberta esperando uma pessoa.
+
+Quem pede esse caminho **ao** Porteiro (porta `5677`) recebe 403: `Acesso Negado: Esta rota e bloqueada para acessos externos.` O aviso é uma saída do Porteiro, não uma rota pública.
+
+### Três caminhos
+
+1. **n8n como ponte (recomendado).** Deixe o webhook `solicitar-verificacao-acesso` no n8n e troque o node de e-mail pelo destino que quiser: Slack, Telegram, HTTP Request, formulário ou botão. O veredito volta por `/n8n/aprovar`, `/n8n/bloquear` ou `/n8n/vincular`, com `X-Admin-Token`. Não precisa de SMTP.
+2. **Consultar a fila.** A automação chama `GET http://127.0.0.1:5676/n8n/fila` de tempos em tempos, com o token, e age sobre os itens `pendente`.
+3. **Outra aplicação no lugar do webhook.** Ela escuta em `127.0.0.1`, no caminho fixo. Se a porta não for `5678`, use `N8N_LOCAL_PORT` na sessão, antes do `iniciar_servicos.ps1`.
+
+O workflow de exemplo aprova e bloqueia. Ele não chama `/n8n/vincular`. Com o Scout, `exige_porteiro` em `Scout_OSINT_Docker/scout/core/porta_apps.py` só abre um app com o IP aprovado, a origem aprovada, `conta_vinculada` igual à conta da sessão e `vinculo` em `ativo`.
+
+### Portas
+
+| Porta / endpoint | Quem escuta | Para que serve | Onde se define | Padrão |
+|---|---|---|---|---|
+| `5677` | Porteiro, em `127.0.0.1` | Entrada do visitante. Também aceita `/n8n/*` com token, só de loopback ou do IP listado do `n8n_app` | Fixa em `Porteiro/porteiro.js` (`PORTA_DO_PORTEIRO`) | `5677` |
+| `5676` | Porteiro, em `127.0.0.1` | Só `/n8n/*`. Outro caminho responde 404: `Esta porta so atende as rotas locais de aprovacao.` | `PORTEIRO_ADMIN_PORT` no ambiente do processo `node` | `5676` |
+| `5678` | n8n (`n8n_app`), em `127.0.0.1` | Editor e webhooks do n8n | `n8n/docker-compose.yml` (`ports`) | `5678` |
+| `GET /webhook/solicitar-verificacao-acesso` | Quem estiver em `127.0.0.1` na porta do aviso | Saída do Porteiro quando há visitante na fila | Host e caminho fixos. Só a porta muda (`N8N_LOCAL_PORT`) | `127.0.0.1:5678` |
+| `4050` | Scout, portal do túnel | Destino do ngrok com `USE_SCOUT=1` (`scout-backend` e `SCOUT_PUBLIC_PORT`) | `SCOUT_PUBLIC_PORT` no `.env` | `4050` |
+| `4040` | ngrok, em `127.0.0.1` | API local de onde o Porteiro lê o domínio público (`configurarDominio`) | `ngrok/docker-compose.yml` | `4040` |
+
+Nenhuma rota de veredito aplica o veredito pela URL pública do ngrok. Se o pedido chega com sinal de túnel, a resposta é 403.
+
+### Quando o aviso sai
+
+O aviso sai em três casos: nasce um IP pendente, aparece uma origem nova (também quando o dispositivo da mesma origem muda) e o painel chama `/n8n/solicitar`. Não há botão **Solicitar** na aba Admin. `_pedir_vinculo`, em `control_plane/app.py`, chama essa rota quando alguém entra com token válido e o IP ainda está sem vínculo, na tela **Aguardando aprovação**. Essa chamada leva a conta, então o parâmetro `conta` entra no aviso. Uma visita repetida do mesmo IP, sem origem nova e sem essa chamada, não dispara outro aviso.
+
+Com o Scout, quem cria o pendente é o Scout, na porta `5676`: `tocar` chama `/n8n/tocar` e `registrar` chama `/n8n/registrar-origem` (`porta_apps.py`, URL em `PORTEIRO_FILA_URL`). São dois avisos: um quando o IP nasce e outro quando a origem nova entra. O navegador não recebe o token. O primeiro aviso, o do `tocar`, pode ir com navegador, sistema e idioma vazios, porque essa chamada manda o IP. O aviso da origem nova leva `origem` e `dispositivo`. O `dispositivo` é o SHA-256 da chave pública do navegador, em hexadecimal (`origem.js`).
+
+### Contrato do aviso
+
+```text
+GET http://127.0.0.1:<porta>/webhook/solicitar-verificacao-acesso
+    ?ip=<ip>&conta=<conta>&dispositivo=<id>&origem=<id>&origem_aprovada=<id>
+    &navegador=<nome>&sistema=<nome>&idioma=<tag>&horario=<UTC ISO-8601>&pais=
+```
+
+`<porta>` é `N8N_LOCAL_PORT` ou `5678`. É `http` e `GET`, sem corpo e sem token. `conta` só entra quando existe. `pais` vai sempre vazio: não há GeoIP, e o idioma não é copiado para esse campo. `horario` é UTC, gerado no Porteiro.
+
+No node **Configuracoes** do workflow de exemplo, `porteiro_url` já vem `http://host.docker.internal:5677` e `admin_token` já vem `{{ $env.PORTEIRO_N8N_TOKEN }}`. Não grave o token no workflow em texto aberto. Se a imagem do n8n recusar `$env`, o checklist do README manda colar o conteúdo de `.n8groker/porteiro-n8n.token` no campo. Um script nesta máquina lê o arquivo. O valor aceito é o de `.n8groker/porteiro-painel.token` ou o de `.n8groker/porteiro-n8n.token`. O `iniciar_servicos.ps1` cria os dois. `PORTEIRO_TOKEN` é ignorado. Se `PORTEIRO_PAINEL_TOKEN` ou `PORTEIRO_N8N_TOKEN` estiver no ambiente do processo `node`, esse valor vale no lugar do arquivo correspondente.
+
+### O veredito
+
+| Ação | Chamada | Efeito |
+|---|---|---|
+| Ver a fila | `GET /n8n/fila` | JSON `{visitantes: [...]}` com os registros como estão gravados. Há `status` e `origens`. `conta_vinculada` e `vinculo` aparecem depois de um vínculo aceito |
+| Aprovar | `GET /n8n/aprovar?ip=<ip>&origem=<id>` | O par fica `aprovado` (`origens.aprovar`). Não grava `conta_vinculada`. Sem `origem`, nada é aprovado |
+| Bloquear | `GET /n8n/bloquear?ip=<ip>&origem=<id>` | Bloqueia essa origem. Sem `origem`, bloqueia o IP inteiro (`fila.bloquear`) |
+| Vincular | `GET /n8n/vincular?ip=<ip>&conta=<conta>&origem=<id>` | Liga a conta ao par já aprovado. Sem `origem`, recusa |
+
+| Quem chama | Endereço |
+|---|---|
+| Processo nesta máquina (script, outra automação, aba Admin) | `http://127.0.0.1:5676` |
+| Container `n8n_app` | `http://host.docker.internal:5677` (é o `porteiro_url` do workflow), sem header de proxy |
+| Outro container, no Docker Desktop, quando `host.docker.internal` aparece como loopback | A mesma URL, com o token. O bind em `127.0.0.1` não separa esse container. A proteção é o token |
+| Socket que não é loopback | Só passa se for o IP do `n8n_app` na faixa `172.16/12`, lido de `.n8groker/n8n-container-ip` (o `iniciar_servicos.ps1` grava com `docker inspect`) ou de `PORTEIRO_N8N_IPS` no ambiente do `node`. A faixa inteira não passa: o Scout também está nela |
+| URL do ngrok, ou pedido com `X-Forwarded-For`, `X-Forwarded-Host` ou `Host` do ngrok | Recusado com 403, mesmo com token (`decidirAdmin` em `Porteiro/admin_rede.js`) |
+
+Respostas em texto puro, exceto `fila` e `solicitar` (JSON):
+
+| Código | Texto | Quando |
+|---|---|---|
+| `200` | `Sucesso! A origem ... do IP ... esta aprovada.` | `aprovar` com origem que está na fila |
+| `200` | `Sucesso! A origem ... esta bloqueada.` | `bloquear` com origem |
+| `200` | `Sucesso! O IP ... agora esta bloqueado.` | `bloquear` sem origem |
+| `200` | `IP ... vinculado a <conta>.` | `vincular` aceito. Este texto não começa com `Sucesso!` |
+| `400` | `IP invalido.` | `ip` ausente ou mal formado |
+| `400` | `Origem obrigatoria. Dispositivo nao aprovado.` | `aprovar` sem `origem`. Esta conferência vem antes da fila |
+| `400` | `Origem obrigatoria.` | `vincular` sem `origem` |
+| `400` | `Conta invalida.` | `vincular` com conta fora do padrão: 3 a 64 caracteres, letras, números, ponto, `_` ou `-` |
+| `403` | `Token invalido.` ou `Token de aprovacao nao configurado.` | Header ausente ou errado. Vem antes de olhar a fila |
+| `403` | `As rotas de aprovacao nao aceitam acesso pelo tunel.` | Header de proxy ou `Host` do ngrok |
+| `403` | `As rotas de aprovacao so aceitam a rede local da maquina.` | Socket fora de loopback e fora do IP listado do n8n |
+| `404` | `Erro: O IP nao esta na fila de espera.` | `aprovar` (com origem) ou `bloquear` de um IP que não está na fila. Essa recusa não entra em `.n8groker/audit.jsonl` |
+| `404` | `Origem nao registrada.` | `aprovar` ou `bloquear` com origem que não pertence a esse IP |
+| `404` | `Rota admin desconhecida.` | Caminho `/n8n/` que não é fila, tocar, registrar-origem, aprovar, bloquear, vincular nem solicitar |
+| `409` | `O par IP e origem precisa estar aprovado antes do vinculo.` | `vincular` com o par ausente ou ainda não aprovado. Um IP que não está na fila cai aqui, não no 404, quando a chamada traz `origem` |
+| `409` | `O IP precisa estar aprovado antes do vinculo.` | O par da origem está aprovado, mas o IP inteiro não está (`fila.vincular`) |
+| `429` | `Muitas requisicoes. Aguarde.` | Mais de 60 pedidos por minuto de um socket que não é loopback. A conferência vem antes do token. Loopback não entra no limite |
+
+O veredito aplicado (`aprovar`, `bloquear` ou `vincular` com sucesso) entra em `.n8groker/audit.jsonl`. O Porteiro só decide sobre IP que já está na fila. Para testar, entre antes pelo túnel com um navegador e use o `ip` e a `origem` do aviso, ou os que aparecem em `/n8n/fila`. Aprovar ou bloquear um IP inventado, com origem no caso do aprovar, volta 404.
+
+### O alerta da trilha é outro webhook
+
+`N8GROKER_ALERTA_WEBHOOK`, no ambiente do `scout-backend`, não muda veredito. O padrão no compose do Scout é `http://n8n_app:5678/webhook/alerta-trilha`. `url_do_alerta` e `_webhook_local`, em `Scout_OSINT_Docker/scout/core/trilha.py`, só chamam `http`, com caminho que começa em `/webhook/`, e só para `n8n_app`, `host.docker.internal`, `127.0.0.1`, `localhost` ou o host de `N8N_UPSTREAM_HOST`. Qualquer outro destino é ignorado, sem aviso. Dentro do container, com `SCOUT_BACKEND=1`, `127.0.0.1` e `localhost` são reapontados para `n8n_app` (ou para `N8N_UPSTREAM_HOST`). Para um receptor no host, use `host.docker.internal`.
+
+### Não mude a porta sem ajustar o resto
+
+- `5676`: a aba Admin chama `http://127.0.0.1:5676` (`control_plane/porteiro_admin.py`) e o compose do Scout usa `PORTEIRO_FILA_URL=http://host.docker.internal:5676/n8n/fila`. Se mudar `PORTEIRO_ADMIN_PORT`, os dois param de falar com a fila.
+- `5678`: `fazerProxy` usa essa porta fixa, independente de `N8N_LOCAL_PORT`.
+- `5676` e `5677`: uma rota manual do Scout não pode escutá-las nem apontar o túnel para elas (`redirection_registry.py`). A rota `porteiro-manual` continua levando o visitante ao `5677`.
 
 ---
 
@@ -716,7 +840,7 @@ Equivalente a estado “pronto para GitHub”: apaga dados voláteis, mantém c�
 1. **Primeira vez (cópia limpa):** `factory_reset.bat` → **`Setup.bat`** → `iniciar_servicos.ps1` → checklist n8n (secção 16).
 2. **Importar e activar** `Aprovacao de Acesso (Novo).json` — único workflow de aprovação do projecto.
 3. **Token de aprovação é obrigatório** — dois arquivos em `.n8groker/`, não no `.env`. O workflow manda `X-Admin-Token`. Vazio ou errado é 403.
-4. **Configurar SMTP** no node `Email e Espera Aprovacao` antes de activar o workflow (ou substituir por outro node de aprovação, desde que a saída seja compatível).
+4. **SMTP só se usar o node de e-mail** do workflow de exemplo (`Email e Espera Aprovacao`). Sem esse node, o aviso segue para Slack, Telegram, outro fluxo ou um script, e o veredito volta pelas rotas `/n8n/*`. Ver a seção 7.1.
 5. **Não alterar `N8N_ENCRYPTION_KEY`** após a primeira instalação (perda de credenciais criptografadas).
 6. **Rede Docker** `rede_comunicacao` — o **Setup.bat** cria automaticamente; comando manual só se o Setup não correu.
 7. **Scout:** manter só rota `porteiro` activa em `:4050` → `host.docker.internal:5677`; upstream `127.0.0.1` dentro do container falha.
@@ -753,9 +877,9 @@ flowchart LR
 | 5 | **`http://127.0.0.1:5678`** | Criar a conta do produto n8n (primeiro acesso). Isso não é o admin do painel. |
 | 6 | Importar workflow | `Workflows_para_Autenticação/Aprovacao de Acesso (Novo).json`. |
 | 7 | Node **Configuracoes** | `admin_email`, `admin_token` (`{{ $env.PORTEIRO_N8N_TOKEN }}` ou o arquivo `porteiro-n8n.token`), confirmar `porteiro_url`. |
-| 8 | Node **Email e Espera Aprovacao** | Credencial SMTP. |
-| 9 | **Activar** workflow | Sem isto, o Porteiro não dispara aprovação por e-mail. |
-| 10 | Testar | Aceder à URL ngrok num browser; deve aparecer fila + e-mail ao admin, se o workflow estiver ativo. |
+| 8 | Node **Email e Espera Aprovacao** | Credencial SMTP só se for usar o node de e-mail. Sem esse node, o SMTP não entra. |
+| 9 | **Ativar** o workflow | Só se o aviso for para o n8n. Sem o workflow ativo, o n8n responde 404 ao aviso. A fila continua, e o veredito pode vir da aba Admin ou de outra automação. |
+| 10 | Testar | Acessar a URL do ngrok num browser. O IP entra na fila. O e-mail ao admin só sai se o node de e-mail estiver configurado e o workflow ativo. |
 
 O admin do painel é outro passo, e não tem senha. Na raiz, `python -m control_plane.admin_token --init` cria `.n8groker/admin.key` e o comando sem `--init` imprime um JWT de 5 minutos. Cole no campo **Token de admin** de `http://localhost:8501`. A aba Admin cria as contas do painel, sem senha, e emite o JWT de usuário (**Emitir token**). A chave desse JWT é `.n8groker/usuario.key`. A borda (`/painel`, porta `8502`) aceita o token de usuário e recusa o JWT de admin. A mesma aba chama `http://127.0.0.1:5676`. Se o webhook do n8n responder 404, a fila e os botões Aprovar, Reprovar e Vincular continuam valendo.
 

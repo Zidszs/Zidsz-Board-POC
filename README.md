@@ -44,7 +44,7 @@ Modo legado (`USE_SCOUT=0`): Ngrok aponta directo para o Porteiro. Nesse modo a 
 | 2 | Preencher só o `NGROK_AUTHTOKEN`. O Setup gera a `N8N_ENCRYPTION_KEY` e não troca uma chave que já exista. O token de aprovação não vai no `.env` |
 | 3 | Executar **`Setup.bat`** — prepara a base (não sobe serviços) |
 | 4 | Executar **`iniciar_servicos.ps1`** — na primeira vez pergunta, em português, o que falta (ferramenta, motor do Docker, `.env`, venv) e só então sobe o núcleo: Control Plane em `http://localhost:8501`, borda em `8502` (se o venv existir), Ollama local se `USE_OLLAMA_LOCAL=1` e o programa já estiver instalado, Porteiro, ngrok e Scout (se `USE_SCOUT=1`). n8n e Langfuse/LiteLLM ficam de fora, salvo `STACKS_BOOT` (exemplo `n8n,llm`) |
-| 5 | Configurar o n8n (conta, workflow, SMTP) — ver checklist abaixo |
+| 5 | Configurar o n8n (conta e workflow). O SMTP só entra se o fluxo usar o node de e-mail. Ver o checklist abaixo |
 | 6 | Tecla **`G`** no HUD abre o painel na aba Scout (`http://localhost:8501/?aba=scout`). O login do painel continua valendo |
 
 A rede Docker `rede_comunicacao` é criada pelo **Setup.bat** (opção auto-config) ou pelo **`iniciar_servicos.ps1`**, que cria a rede quando o motor Docker está no ar, sem perguntar. Só crie manualmente se os dois não rodaram:
@@ -78,7 +78,7 @@ factory_reset.bat  →  Setup.bat  →  iniciar_servicos.ps1  →  n8n (manual)
    - `admin_email` → seu e-mail de aprovador (não deixe `voce@exemplo.com`).
    - `admin_token` → já vem `{{ $env.PORTEIRO_N8N_TOKEN }}`. É obrigatório. Se o n8n recusar `$env`, cole o conteúdo de `.n8groker/porteiro-n8n.token`. Campo vazio passa a responder 403.
    - `porteiro_url` → `http://host.docker.internal:5677` (já vem correto).
-4. No node **Email e Espera Aprovacao** → configurar **credencial SMTP**.
+4. No node **Email e Espera Aprovacao**, a credencial SMTP só é necessária se for usar o node de e-mail. Slack, Telegram ou um HTTP Request não precisam de SMTP.
 5. **Ativar** o workflow (no JSON vem `"active": false`). Um workflow já importado nesta máquina não muda sozinho: edite o node ou importe de novo.
 
 ### Nodes bloqueados no n8n
@@ -153,6 +153,8 @@ O veredito volta sempre com `X-Admin-Token`:
 Da máquina, o prefixo é `http://127.0.0.1:5676`. Do container n8n, `http://host.docker.internal:5677`. A aba Admin do console usa a porta 5676 e atualiza a lista na hora. Cada veredito entra em `.n8groker/audit.jsonl`.
 
 A aprovação é o par IP e origem. Uma segunda origem no mesmo IP fica pendente. A já aprovada continua.
+
+Para ligar esse aviso a outra automação, sem SMTP obrigatório: [7.1 Integrar o Porteiro com outra automação](DOCUMENTACAO.md#integrar-porteiro-automacao).
 
 ### Contas do painel e JWT de admin
 

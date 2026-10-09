@@ -500,6 +500,109 @@ Mensagens da fila e do Porteiro:
 
 O webhook de alerta do Scout não muda veredito. Esta aba não o chama.
 
+<a id="integrar-aviso-porteiro"></a>
+
+### Integrar o aviso do Porteiro
+
+O Porteiro não manda e-mail. Ele avisa que alguém entrou na fila e espera um veredito. O e-mail é só o workflow de exemplo. O SMTP só entra se você usar esse node de e-mail.
+
+O destino do aviso não se configura. O host é sempre `127.0.0.1` e o caminho é sempre `/webhook/solicitar-verificacao-acesso`. Os dois estão fixos no código, de propósito, e não mudam. A única coisa que muda é a porta, pela variável `N8N_LOCAL_PORT` da sessão do PowerShell, antes de `iniciar_servicos.ps1`. Ela não é lida do `.env`. Sem essa variável, a porta é `5678`, onde o n8n já escuta.
+
+Qualquer programa nesta máquina que atenda esse GET recebe o aviso. Não precisa ser o n8n. O Porteiro avisa um destino só. Se o programa usar outra porta, defina `N8N_LOCAL_PORT` com essa porta na mesma janela em que o script vai rodar. Não coloque outro programa na `5678` enquanto o n8n estiver no ar.
+
+Há três jeitos de montar o fluxo.
+
+1. **Deixar o n8n no meio.** É o caminho recomendado. O aviso entra no n8n e sai para onde você quiser: Slack, Telegram, um botão ou um pedido HTTP. A resposta volta ao Porteiro em `/n8n/aprovar`, `/n8n/bloquear` ou `/n8n/vincular`, com o header `X-Admin-Token`.
+2. **Outro programa no lugar do webhook.** Ele escuta em `127.0.0.1` da máquina, no caminho fixo. O Porteiro roda na máquina, então um programa só dentro do Docker precisa publicar a porta nesse endereço. A porta, se não for a `5678`, vem de `N8N_LOCAL_PORT`.
+3. **Não esperar o aviso.** De tempos em tempos, consulte `GET http://127.0.0.1:5676/n8n/fila` com o token e aja sobre quem está `pendente`.
+
+O token está em `.n8groker/porteiro-n8n.token` ou em `.n8groker/porteiro-painel.token`. O `iniciar_servicos.ps1` cria os dois. No n8n, o campo já vem como `{{ $env.PORTEIRO_N8N_TOKEN }}`. Não copie o token para este guia nem para um workflow em texto aberto.
+
+Entre primeiro pelo túnel, com um navegador. Use o `ip` e a `origem` que chegaram no aviso, ou os que a fila mostra. O Porteiro só decide sobre IP que já está na fila. Aprovar ou bloquear um IP que nunca passou por ele volta 404. Aprovar sem origem volta 400. Vincular um IP que não está na fila, se a chamada trouxer origem, volta 409: o par ainda não está aprovado.
+
+O aviso não espera uma pessoa. Responda logo, por exemplo com 200, e decida depois. O Porteiro espera no máximo 5 segundos e só anota o resultado no log. Se o destino estiver fora do ar, a fila continua. **Aprovar**, **Bloquear o IP inteiro** e **Vincular** nesta aba seguem valendo.
+
+O workflow de exemplo não vincula a conta. Com o Scout, abrir um app ainda pede esse vínculo, depois do aprovar.
+
+O contrato completo, com portas e todos os códigos, está na [seção 7.1 da documentação](../../DOCUMENTACAO.md#integrar-porteiro-automacao).
+
+#### Fluxo padrão
+
+O visitante chega pelo túnel. O Porteiro grava a fila e avisa o n8n. A pessoa aprova pelo e-mail ou pelo botão. O Porteiro libera aquele IP.
+
+```mermaid
+flowchart LR
+    visitante["Visitante"] --> tunel["Tunel"]
+    tunel --> porteiro["Porteiro"]
+    porteiro --> fila["Fila"]
+    porteiro --> webhook["Webhook do n8n"]
+    webhook --> pessoa["E-mail ou botao"]
+    pessoa --> aprovar["Aprovar com token"]
+    aprovar --> libera["Porteiro libera o IP"]
+```
+
+#### n8n como ponte
+
+O n8n recebe o aviso e repassa para o Slack, o Telegram ou outra ferramenta. O veredito volta ao Porteiro com o token. O SMTP não entra nesse caminho.
+
+```mermaid
+flowchart LR
+    porteiro["Porteiro"] --> n8n["n8n recebe o aviso"]
+    n8n --> slack["Slack"]
+    n8n --> telegram["Telegram"]
+    n8n --> outro["Outra ferramenta"]
+    slack --> volta["Veredito com token"]
+    telegram --> volta
+    outro --> volta
+    volta --> destino["Porteiro aplica o veredito"]
+```
+
+#### Outra aplicação no webhook
+
+O aviso vai para o programa que estiver em `127.0.0.1`, no caminho fixo. A porta é a de `N8N_LOCAL_PORT`, se você a definiu antes de subir. O veredito volta na porta `5676`.
+
+```mermaid
+flowchart LR
+    porteiro["Porteiro"] --> local["GET em 127.0.0.1"]
+    local --> app["Sua aplicacao na porta escolhida"]
+    app --> veredito["Veredito na porta 5676"]
+    veredito --> porteiro
+```
+
+#### Consultar a fila
+
+A automação pergunta a fila na porta `5676` e, com o mesmo token, aprova, bloqueia ou vincula. Não precisa receber o webhook.
+
+```mermaid
+flowchart LR
+    auto["Sua automacao"] --> consulta["GET /n8n/fila na porta 5676"]
+    consulta --> porteiro["Porteiro"]
+    porteiro --> lista["JSON dos visitantes"]
+    lista --> auto
+    auto --> veredito["Aprovar, bloquear ou vincular"]
+    veredito --> porteiro
+```
+
+#### Aviso e veredito
+
+O 200 do aviso é a sua automação respondendo rápido. O 200, o 403 e o 404 seguintes são o Porteiro respondendo ao veredito. O 403 vem antes de olhar a fila. O 404 do exemplo é um aprovar com origem, token válido e IP que não está na fila.
+
+```mermaid
+sequenceDiagram
+    participant Visitante
+    participant Porteiro
+    participant Automacao
+    Visitante->>Porteiro: Entra pelo tunel
+    Porteiro->>Automacao: GET do aviso, sem token
+    Automacao-->>Porteiro: 200
+    Automacao->>Porteiro: Aprovar com token e IP da fila
+    Porteiro-->>Automacao: 200
+    Automacao->>Porteiro: Aprovar sem token
+    Porteiro-->>Automacao: 403
+    Automacao->>Porteiro: Aprovar IP fora da fila, com token
+    Porteiro-->>Automacao: 404
+```
+
 ## Chat de suporte
 
 Opção **Chat de suporte**. Subtítulo igual. A legenda traz o endereço e o modelo lidos do `.env` (padrão `http://localhost:11434` e `qwen2.5-coder:7b`): `Ollama em <url>, modelo <modelo>. Status e logs rodam na hora. Iniciar, parar e reiniciar só depois de Confirmar. Este chat não desliga o Control Plane. Um modelo de 7B pode errar um passo.`
